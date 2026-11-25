@@ -1,0 +1,282 @@
+# Hand-written (role.yaml is the generated one). What the controller does in
+# the management cluster: it is the only thing that reconciles, so it
+# installs the Crossplane providers and applies, watches and deletes the
+# objects the platform renders (pkg/reconcile, pkg/crossplane). Its own kinds
+# are in the generated role.yaml.
+#
+# It reads no Secret: its AWS credentials are its own (IRSA, the service
+# account's annotation), and every lookup assumes the tenant role of the
+# account it reads (pkg/reconcile/access.go). Kept in step with the code by
+# config/deploy_test.go.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: platform-role
+rules:
+# Kubernetes-backed uniqueness claims, including physical EKS-name reservations
+# in kube-system. Both API writes and controller recovery use direct reads.
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - create
+  - update
+  - patch
+  - delete
+# Installing the providers at startup (--install-providers,
+# pkg/crossplane/aws InstallProviders): the AWS providers, provider-helm and
+# their runtime configs are created when missing, never changed.
+- apiGroups:
+  - pkg.crossplane.io
+  resources:
+  - providers
+  - deploymentruntimeconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+# The platform's activation policy: created, and kinds a newer build uses are
+# added to an existing one (addActivations).
+- apiGroups:
+  - apiextensions.crossplane.io
+  resources:
+  - managedresourceactivationpolicies
+  verbs:
+  - get
+  - create
+  - update
+# The managed resources the platform renders for networks and clusters:
+# the kinds of pkg/crossplane/aws ActivationPolicy (managedMRDs). Applied
+# (create, patch), read through the informer cache (list, watch), deleted
+# one by one and by label (delete, deletecollection).
+- apiGroups:
+  - ec2.aws.m.upbound.io
+  resources:
+  - vpcs
+  - internetgateways
+  - subnets
+  - eips
+  - natgateways
+  - routetables
+  - routes
+  - routetableassociations
+  - flowlogs
+  - defaultnetworkacls
+  - networkacls
+  - networkaclrules
+  - launchtemplates
+  - securitygroups
+  - securitygroupingressrules
+  - securitygroupegressrules
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - eks.aws.m.upbound.io
+  resources:
+  - clusters
+  - nodegroups
+  - addons
+  - podidentityassociations
+  - accessentries
+  - accesspolicyassociations
+  - clusterauths
+  - identityproviderconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - iam.aws.m.upbound.io
+  resources:
+  - roles
+  - rolepolicyattachments
+  - policies
+  - openidconnectproviders
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - kms.aws.m.upbound.io
+  resources:
+  - keys
+  - aliases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - cloudwatchlogs.aws.m.upbound.io
+  resources:
+  - groups
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Karpenter's interruption queue and the EventBridge rules feeding it
+# (components; activated, nothing renders them yet).
+- apiGroups:
+  - sqs.aws.m.upbound.io
+  resources:
+  - queues
+  - queuepolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - cloudwatchevents.aws.m.upbound.io
+  resources:
+  - rules
+  - targets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# The bucket of a cluster's scan results and its settings
+# (docs/architecture.md#results-in-s3).
+- apiGroups:
+  - s3.aws.m.upbound.io
+  resources:
+  - buckets
+  - bucketpublicaccessblocks
+  - bucketownershipcontrols
+  - bucketserversideencryptionconfigurations
+  - bucketpolicies
+  - bucketlifecycleconfigurations
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# provider-helm: a cluster's ProviderConfig (<prefix>-helm, reaching the
+# workload cluster through its ClusterAuth's kubeconfig) is applied with the
+# cluster; Releases are installed through it, and stuck ones are released
+# when a cluster is deleted (pkg/reconcile/cluster cleanup.go).
+- apiGroups:
+  - helm.m.crossplane.io
+  resources:
+  - providerconfigs
+  - releases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Usages order the deletion of managed resources (pkg/crossplane/aws
+# usage.go); orphaned ones are released (pkg/crossplane/managed).
+- apiGroups:
+  - protection.crossplane.io
+  resources:
+  - usages
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# An account's ProviderConfig, applied at bootstrap (pkg/reconcile/account).
+- apiGroups:
+  - aws.m.upbound.io
+  resources:
+  - providerconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# Tenant namespaces, applied at bootstrap and cached.
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+# The CustomResourceDefinitions of the cloud.cluster-vending.io kinds, which
+# the controller installs at startup (pkg/management ConnectStore). The API
+# server waits for them.
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+# Events on the platform's objects and of the leader election.
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch

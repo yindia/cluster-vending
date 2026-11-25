@@ -1,0 +1,268 @@
+# What `cluster-vending serve` does in the management cluster: it writes the
+# platform's own kinds (the desired state) and reads the rest. It applies and
+# deletes nothing of a network or cluster, installs nothing, and reads no
+# Secret: that is the controller (config/rbac/platform_role.yaml). It makes
+# no AWS call, so its service account has no IAM role. Kept in step with the
+# code by config/deploy_test.go.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-server
+    app.kubernetes.io/managed-by: kustomize
+  name: server-role
+rules:
+# The state itself: CloudAccount, Network, Cluster and Component objects
+# in the tenants' namespaces (pkg/database/cloudstore).
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - tenants
+  - tenants/status
+  - tenants/finalizers
+  - cloudaccounts
+  - cloudaccounts/status
+  - networks
+  - networks/status
+  - clusters
+  - clusters/status
+  - subtenants
+  - subtenants/status
+  - subtenants/finalizers
+  - components
+  - components/status
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+# The operator's release objects and component catalog: read only (they
+# are written by people with the release-admin role, and their status by
+# the controller).
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releases
+  - releasechannels
+  - releaseholds
+  - componentdefinitions
+  verbs:
+  - get
+  - list
+  - watch
+# A freeze (AdminService.Freeze) is a
+# release hold: the server writes it for the platform admin.
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releaseholds
+  verbs:
+  - create
+  - update
+  - delete
+# What the controller reported about a network or a cluster: the
+# Kubernetes events in the tenants' namespaces, read for
+# ListNetworkEvents and ListClusterEvents (pkg/database/cloudstore
+# events.go).
+- apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - get
+  - list
+# ConfigMaps: the recorded usage of each cluster (<cluster>-usage-history,
+# written by the controller), read to compute resource recommendations; and
+# the store's claims (cv-claim-*: request IDs, VPC and cluster names), which
+# a create takes and an abandoned one gives up. Never updated.
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - create
+  - delete
+# TenantService.CreateTenant creates the canonical Tenant CR and ensures its
+# known-owned namespace synchronously. The server never deletes namespaces.
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+# The managed resources of networks and clusters, read through the informer
+# cache for a resource's live status and for the checks a request needs (a
+# network's subnets, a VPC that is already imported). create and patch are
+# for one thing only: the server-side apply DRY RUN behind UpdateCluster
+# validate_only (pkg/server/cluster planning.go), which Kubernetes authorizes
+# like a real apply. No handler applies for real
+# (pkg/server/*/writeonly_test.go), and nothing is updated in place or deleted.
+- apiGroups:
+  - ec2.aws.m.upbound.io
+  resources:
+  - vpcs
+  - internetgateways
+  - subnets
+  - eips
+  - natgateways
+  - routetables
+  - routes
+  - routetableassociations
+  - flowlogs
+  - defaultnetworkacls
+  - networkacls
+  - networkaclrules
+  - launchtemplates
+  - securitygroups
+  - securitygroupingressrules
+  - securitygroupegressrules
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+- apiGroups:
+  - eks.aws.m.upbound.io
+  resources:
+  - clusters
+  - nodegroups
+  - addons
+  - podidentityassociations
+  - accessentries
+  - accesspolicyassociations
+  - clusterauths
+  - identityproviderconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+- apiGroups:
+  - iam.aws.m.upbound.io
+  resources:
+  - roles
+  - rolepolicyattachments
+  - policies
+  - openidconnectproviders
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+- apiGroups:
+  - kms.aws.m.upbound.io
+  resources:
+  - keys
+  - aliases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+- apiGroups:
+  - cloudwatchlogs.aws.m.upbound.io
+  resources:
+  - groups
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+- apiGroups:
+  - sqs.aws.m.upbound.io
+  resources:
+  - queues
+  - queuepolicies
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+- apiGroups:
+  - cloudwatchevents.aws.m.upbound.io
+  resources:
+  - rules
+  - targets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+# The bucket of a cluster's scan results and its settings (part of the
+# render, for the dry run).
+- apiGroups:
+  - s3.aws.m.upbound.io
+  resources:
+  - buckets
+  - bucketpublicaccessblocks
+  - bucketownershipcontrols
+  - bucketserversideencryptionconfigurations
+  - bucketpolicies
+  - bucketlifecycleconfigurations
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+# provider-helm: a cluster's ProviderConfig is part of its render (the dry
+# run above); Releases are read for their status.
+- apiGroups:
+  - helm.m.crossplane.io
+  resources:
+  - providerconfigs
+  - releases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+# Usages, read for a deletion that waits on one.
+- apiGroups:
+  - protection.crossplane.io
+  resources:
+  - usages
+  verbs:
+  - get
+  - list
+  - watch
+# Account ProviderConfigs are reconciled by the controller. The server reads
+# them and may dry-run a reviewed plan; account registration creates neither a
+# ProviderConfig nor a tenant namespace.
+- apiGroups:
+  - aws.m.upbound.io
+  resources:
+  - providerconfigs
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - patch
+# Events on the platform's objects and of the leader election.
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch

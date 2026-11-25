@@ -1,0 +1,123 @@
+{{- if and .Values.live.enabled .Values.networkPolicy.live }}
+# The live reader accepts only the API server's pods (PROP-02 7.4); the
+# kubelet's probes come from the node. Egress: DNS, and HTTPS to the
+# management cluster's API and the workload clusters' endpoints.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "live") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" (dict "root" . "component" "live") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cv.selectorLabels" (dict "root" . "component" "live") | nindent 6 }}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          {{- include "cv.selectorLabels" (dict "root" . "component" "server") | nindent 10 }}
+    ports:
+    - port: 8090
+      protocol: TCP
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  - ports:
+    - port: 443
+      protocol: TCP
+    - port: 6443
+      protocol: TCP
+{{- end }}
+{{- if and .Values.server.enabled .Values.networkPolicy.server.enabled }}
+---
+# The API server accepts the console's pods and networkPolicy.server.from.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "server") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" (dict "root" . "component" "server") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cv.selectorLabels" (dict "root" . "component" "server") | nindent 6 }}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          {{- include "cv.selectorLabels" (dict "root" . "component" "ui") | nindent 10 }}
+    {{- with .Values.networkPolicy.server.from }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    ports:
+    - port: 8080
+      protocol: TCP
+{{- end }}
+{{- if and .Values.ui.enabled .Values.networkPolicy.ui.enabled }}
+---
+# The console accepts networkPolicy.ui.from only (an ingress controller).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "ui") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" (dict "root" . "component" "ui") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cv.selectorLabels" (dict "root" . "component" "ui") | nindent 6 }}
+  policyTypes:
+  - Ingress
+  {{- with .Values.networkPolicy.ui.from }}
+  ingress:
+  - from:
+      {{- toYaml . | nindent 4 }}
+    ports:
+    - port: 3000
+      protocol: TCP
+  {{- else }}
+  # No peer listed: nothing in the cluster reaches it (port-forward still does).
+  ingress: []
+  {{- end }}
+{{- end }}
+{{- if and .Values.controller.enabled .Values.controller.metrics.enabled .Values.networkPolicy.controllerMetrics }}
+---
+# Only namespaces labelled metrics=enabled reach the metrics port; the probe
+# port stays open for the kubelet (config/network-policy).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "controller-metrics") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" (dict "root" . "component" "controller") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cv.selectorLabels" (dict "root" . "component" "controller") | nindent 6 }}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          metrics: enabled
+    ports:
+    - port: {{ .Values.controller.metrics.port }}
+      protocol: TCP
+  - ports:
+    - port: 8081
+      protocol: TCP
+{{- end }}

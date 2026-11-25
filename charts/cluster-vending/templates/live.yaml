@@ -1,0 +1,130 @@
+{{- if .Values.live.enabled }}
+{{- $ctx := dict "root" . "component" "live" }}
+{{- $l := .Values.live }}
+# The live reader's identity (config/live). Fixed name: the controller binds
+# cluster-vending-live in each tenant namespace. No IAM role.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "cv.liveServiceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+  {{- with $l.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+# Reads Clusters and ClusterAuths; writes nothing, grants no Secret
+# (config/live/role.yaml). The kubeconfig Secrets come through the tenant
+# namespaces' binding the controller makes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "live-role") }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+rules:
+  {{- include "cv.rules" (dict "root" . "file" "live_role.yaml") | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "live-rolebinding") }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cv.name" (dict "root" . "component" "live-role") }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "cv.liveServiceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+---
+# `cluster-vending live` (config/live/deployment.yaml). One replica,
+# Recreate: its views and limits are this process's memory (PROP-02 5.5).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "cv.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: live
+        {{- with $l.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "cv.selectorLabels" $ctx | nindent 8 }}
+        {{- with $l.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "cv.liveServiceAccountName" . }}
+      terminationGracePeriodSeconds: {{ $l.terminationGracePeriodSeconds }}
+      {{- include "cv.podPlacement" $ctx | nindent 6 }}
+      containers:
+      - name: live
+        image: {{ include "cv.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command:
+        - /cluster-vending
+        - live
+        env:
+        - name: CV_LIVE_ADDR
+          value: ":8090"
+        - name: CV_LOG_FORMAT
+          value: {{ .Values.log.format | quote }}
+        - name: CV_LOG_LEVEL
+          value: {{ .Values.log.level | quote }}
+        {{- with $l.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        ports:
+        - name: http
+          containerPort: 8090
+          protocol: TCP
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        securityContext:
+          {{- toYaml $l.securityContext | nindent 10 }}
+        livenessProbe:
+          {{- toYaml $l.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml $l.readinessProbe | nindent 10 }}
+        resources:
+          {{- toYaml $l.resources | nindent 10 }}
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+# Internal only: the API server is its one caller.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: {{ $l.service.port }}
+    protocol: TCP
+    targetPort: http
+  selector:
+    {{- include "cv.selectorLabels" $ctx | nindent 4 }}
+{{- end }}

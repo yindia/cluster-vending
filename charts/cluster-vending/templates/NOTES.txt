@@ -1,0 +1,58 @@
+cluster-vending {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+{{- $ns := .Release.Namespace }}
+{{- $auth := (default dict (default dict .Values.platform).auth) }}
+
+Workloads:
+{{- if .Values.server.enabled }}
+  API server   {{ include "cv.name" (dict "root" . "component" "server") }}  (Service port {{ .Values.server.service.port }})
+{{- end }}
+{{- if .Values.controller.enabled }}
+  controller   {{ include "cv.name" (dict "root" . "component" "controller") }}  (installs the CRDs, the Crossplane providers and the catalog on start)
+{{- end }}
+{{- if .Values.live.enabled }}
+  live reader  {{ include "cv.name" (dict "root" . "component" "live") }}  (internal, reachable from the API server only)
+{{- end }}
+{{- if .Values.ui.enabled }}
+  console      {{ include "cv.name" (dict "root" . "component" "ui") }}  (Service port {{ .Values.ui.service.port }})
+{{- end }}
+
+Wait for the pods (the API server becomes ready once the controller has
+installed the platform's CRDs):
+
+  kubectl -n {{ $ns }} get pods -l app.kubernetes.io/instance={{ .Release.Name }} -w
+{{- if .Values.ui.enabled }}
+
+Console: one port-forward is enough. The browser only calls the console's
+origin; the console's server side calls the API at {{ include "cv.apiBaseURL" . }}.
+
+  kubectl -n {{ $ns }} port-forward svc/{{ include "cv.name" (dict "root" . "component" "ui") }} 3000:{{ .Values.ui.service.port }}
+  open http://localhost:3000
+{{- if .Values.ui.auth.enabled }}
+
+  Login is on (ui.auth): the console requires HTTPS for {{ .Values.ui.auth.url }}.
+  Use the Ingress (ui.ingress) with TLS; a plain-HTTP port-forward cannot log in.
+{{- end }}
+{{- end }}
+{{- if .Values.server.enabled }}
+
+API for the CLI:
+
+  kubectl -n {{ $ns }} port-forward svc/{{ include "cv.name" (dict "root" . "component" "server") }} 8080:{{ .Values.server.service.port }}
+  curl -s http://localhost:8080/healthz
+  bin/cluster-vending --server http://localhost:8080 tenant list
+{{- end }}
+{{- if or (not $auth.mode) (eq (toString $auth.mode) "none") }}
+
+WARNING: platform.auth is not set (mode none): every caller is anonymous and
+may call every RPC for every tenant. Keep the Services internal, or set
+platform.auth (docs/architecture.md#authentication).
+{{- else if and .Values.ui.enabled (not .Values.ui.auth.enabled) (eq (toString $auth.mode) "required") }}
+
+WARNING: platform.auth.mode is required but ui.auth.enabled is false: the
+console sends no token and the API refuses its calls. Turn ui.auth on.
+{{- end }}
+{{- if and .Values.server.enabled (not .Values.controller.enabled) }}
+
+NOTE: controller.enabled is false. The API server waits for the platform's
+CRDs, which the controller installs; run a controller somewhere.
+{{- end }}

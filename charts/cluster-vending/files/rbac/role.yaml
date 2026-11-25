@@ -1,0 +1,118 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - cloudaccounts
+  - clusters
+  - componentdefinitions
+  - components
+  - networks
+  - tenants
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - cloudaccounts/finalizers
+  - clusters/finalizers
+  - componentdefinitions/finalizers
+  - components/finalizers
+  - networks/finalizers
+  - releases/finalizers
+  - subtenants/finalizers
+  - tenants/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - cloudaccounts/status
+  - clusters/status
+  - componentdefinitions/status
+  - components/status
+  - networks/status
+  - releasechannels/status
+  - releaseholds/status
+  - releases/status
+  - subtenants/status
+  - tenants/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releasechannels
+  - releases
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releaseholds
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - subtenants
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - cluster-vending-kubeconfig-reader
+  - cluster-vending-usage-history-writer
+  resources:
+  - clusterroles
+  verbs:
+  - bind
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - patch

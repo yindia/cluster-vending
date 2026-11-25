@@ -1,0 +1,113 @@
+{{- if .Values.controller.enabled }}
+{{- $ctx := dict "root" . "component" "controller" }}
+{{- $sa := include "cv.serviceAccountName" $ctx }}
+# The controller's identity. Its AWS access is IRSA (the annotation), nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+  {{- with .Values.controller.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+# Generated from the controller's +kubebuilder:rbac markers (config/rbac/role.yaml).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "manager-role") }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+rules:
+  {{- include "cv.rules" (dict "root" . "file" "role.yaml") | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "manager-rolebinding") }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cv.name" (dict "root" . "component" "manager-role") }}
+subjects:
+- kind: ServiceAccount
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+---
+# What the reconcilers do in the management cluster (config/rbac/platform_role.yaml).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "platform-role") }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+rules:
+  {{- include "cv.rules" (dict "root" . "file" "platform_role.yaml") | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "platform-rolebinding") }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cv.name" (dict "root" . "component" "platform-role") }}
+subjects:
+- kind: ServiceAccount
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+---
+# Leader election: a Lease in the release namespace, and its events.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "leader-election-role") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+rules:
+  {{- include "cv.rules" (dict "root" . "file" "leader_election_role.yaml") | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "leader-election-rolebinding") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cv.name" (dict "root" . "component" "leader-election-role") }}
+subjects:
+- kind: ServiceAccount
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+# Bound to nothing here: the controller binds itself (and the live reader) to
+# these in each tenant namespace, by these exact names.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cv.kubeconfigReaderRole" . }}
+  labels:
+    {{- include "cv.labels" (dict "root" . "component" "controller") | nindent 4 }}
+rules:
+  {{- include "cv.rules" (dict "root" . "file" "kubeconfig_reader_role.yaml") | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cv.usageHistoryWriterRole" . }}
+  labels:
+    {{- include "cv.labels" (dict "root" . "component" "controller") | nindent 4 }}
+rules:
+  {{- include "cv.rules" (dict "root" . "file" "usage_history_writer_role.yaml") | nindent 2 }}

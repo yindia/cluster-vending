@@ -1,0 +1,426 @@
+# cluster-vending: the API server, the controller, the live reader and the
+# console in the management cluster, from one values file. The kustomize
+# manifests under config/ are the reference this chart follows; README.md in
+# this directory explains every section.
+#
+# Install into the platform's namespace, with the release named
+# cluster-vending so the objects are named as in config/
+# (cluster-vending-server, cluster-vending-ui, ...):
+#
+#   helm install cluster-vending charts/cluster-vending \
+#     -n cluster-vending-system --create-namespace \
+#     --set aws.managementRoleArn=arn:aws:iam::111122223333:role/crossplane-provider-aws
+#
+# One release per management cluster: the controller binds fixed names in
+# every tenant namespace (cluster-vending-kubeconfig-reader,
+# cluster-vending-usage-history-writer, the cluster-vending-live service
+# account), so two releases would share them.
+
+# Overrides the name prefix of every object (default: the release name when
+# it contains "cluster-vending", else <release>-cluster-vending).
+fullnameOverride: ""
+# Added to every object's labels.
+commonLabels: {}
+# For a private registry: [{name: my-pull-secret}].
+imagePullSecrets: []
+
+# The image of the Go binary (make docker-build). serve, controller and live
+# are subcommands of it.
+image:
+  repository: ghcr.io/yindia/cluster-vending
+  # Default: the chart's appVersion.
+  tag: ""
+  # Wins over tag when set (sha256:...).
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# Defaults for every workload; a workload's own value wins.
+global:
+  nodeSelector: {}
+  tolerations: []
+
+# AWS settings, rendered into the shared settings file (platform.yaml below)
+# as flat keys, so the server and the controller read the same values.
+aws:
+  # REQUIRED with the controller: the IAM role the Crossplane AWS providers
+  # run as (IRSA), in the management account (the account is taken from the
+  # ARN). The tenant roles trust it. The server prints it in `account create`.
+  managementRoleArn: ""
+  # The API server's own IAM role (its IRSA role, server.serviceAccount
+  # annotations): trusted by the account templates, to read results buckets.
+  serverRoleArn: ""
+  # Default region of the SDK, for the role assumptions. Empty: the SDK's.
+  region: ""
+  # Assumed first with the processes' own credentials. Empty: none.
+  sourceRoleArn: ""
+
+# The shared settings file: ONE ConfigMap, mounted at
+# /etc/cluster-vending/platform.yaml into the server and the controller
+# (--config), so they cannot disagree. A change rolls both (a checksum
+# annotation). Keys are the commands' flag names plus the auth, naas and
+# nodeGroups sections (docs/architecture.md#5-configuration). Never put a
+# secret here: secrets are referenced by name (e.g.
+# provider-credentials-secret: <namespace>/<name>), and the UI's come from
+# ui.auth.existingSecret.
+#
+# The default is config/node-groups/platform.yaml (config/helm_chart_test.go
+# keeps them equal). Helm merges maps: to drop a default key, set it to null.
+platform:
+  # Authentication of the API (docs/architecture.md#authentication). Absent:
+  # mode none, every caller is anonymous and may call everything; keep the
+  # Services internal then. Example:
+  # auth:
+  #   mode: required
+  #   issuers:
+  #   - name: keycloak
+  #     issuer: https://login.example.com/realms/platform
+  #     audiences: [cv-api]
+  #     usernameClaim: preferred_username
+  #
+  # Sub-tenant access (PROP-05 6.2), read by both processes:
+  # naas:
+  #   allowedGroups: ["cv-subtenant-*"]
+  #   deniedGroups: ["cv-platform-operators"]
+  nodeGroups:
+    # Every cluster has exactly these two node groups, the platform's;
+    # tenants define none. A change of instanceTypes, capacityType, amiType
+    # or diskSizeGiB replaces each cluster's system group (new group first,
+    # old one retired once the new one is Ready).
+    #
+    # The system group, the default EKS managed node group: runs Karpenter
+    # and the EKS add-ons only. Tainted node.cluster-vending.io/pool=system.
+    system:
+      # One architecture and one vCPU/memory class.
+      instanceTypes: [t3.medium]
+      # The static size (min = max = desired), at least 2. Changed in place.
+      minSize: 2
+      # ON_DEMAND or SPOT.
+      capacityType: ON_DEMAND
+      # AL2023_x86_64_STANDARD, AL2023_ARM_64_STANDARD, BOTTLEROCKET_x86_64
+      # or BOTTLEROCKET_ARM_64, of the instance types' architecture.
+      amiType: AL2023_x86_64_STANDARD
+      # In GiB; 0: EKS's default.
+      diskSizeGiB: 0
+    # The platform pool, the Karpenter NodePool and EC2NodeClass
+    # "platform-pool": where every other platform and tenant component runs.
+    platform:
+      instanceFamilies: [t3]          # testing default; production: m7i, m6i
+      instanceSizes: [large, xlarge, 2xlarge]
+      architectures: [AMD64]          # one per pool
+      capacityTypes: [ON_DEMAND]      # SPOT is refused in this version
+      limits:
+        cpu: 128
+        memory: 512Gi
+      consolidationPolicy: WhenEmpty  # or WhenEmptyOrUnderutilized
+      consolidateAfter: 5m
+      expireAfter: 336h
+      terminationGracePeriod: 1h
+      disruptionBudget: 1             # nodes disrupted at once
+      maxPods: 0                      # 0: Karpenter's default for the shape
+
+# Log settings of serve, controller and live.
+log:
+  level: info   # debug, info, warn, error
+  format: json  # json or text
+
+rbac:
+  # The helper ClusterRoles for people (admin, editor and viewer of clusters,
+  # networks and cloud accounts; release-admin and release-viewer), as
+  # config/rbac. Bound to nothing.
+  userRoles: true
+
+# ---------------------------------------------------------------------------
+# The API server: `cluster-vending serve`. Connect, gRPC and gRPC-Web on one
+# cleartext port, with /healthz, /readyz and /metrics. It stores the desired
+# state and reads; it makes no AWS change and gets no workload-cluster
+# credentials.
+server:
+  enabled: true
+  # More than one replica serves the API.
+  replicas: 1
+  # Extra CV_* variables of the serve command (name/value or valueFrom). Do
+  # not set CV_SYSTEM_*, CV_PLATFORM_* or CV_NODE_GROUP_*: they win over the
+  # shared file. Never CV_LIVE_ALLOW_WITHOUT_AUTH.
+  extraEnv: []
+  extraEnvFrom: []
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+  serviceAccount:
+    # Default: <fullname>-server.
+    name: ""
+    # IRSA: the server's own role (aws.serverRoleArn), to read results
+    # buckets. Never the management role.
+    # eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/cluster-vending-server
+    annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  # /healthz: the process is up. /readyz: the management cluster cache has
+  # synced. The startup probe allows the 5 minutes the server waits for the
+  # kinds the controller installs.
+  livenessProbe:
+    httpGet: {path: /healthz, port: http}
+    periodSeconds: 20
+  readinessProbe:
+    httpGet: {path: /readyz, port: http}
+    periodSeconds: 10
+  startupProbe:
+    httpGet: {path: /healthz, port: http}
+    periodSeconds: 10
+    failureThreshold: 36
+  # Longer than the server's 30s shutdown timeout: in-flight requests drain.
+  terminationGracePeriodSeconds: 45
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podDisruptionBudget:
+    enabled: false
+    minAvailable: 1
+
+# ---------------------------------------------------------------------------
+# The controller: `cluster-vending controller`. The only process that
+# changes AWS. On start it installs the platform's CRDs, the Crossplane AWS
+# providers and provider-helm (installProviders) and the component catalog
+# (installCatalog). Crossplane itself must be installed first.
+controller:
+  enabled: true
+  # More than one replica is fine with leader election: one reconciles.
+  replicas: 1
+  leaderElect: true
+  # Create the Crossplane AWS providers, provider-helm and the activation
+  # policy when missing. false when they are managed elsewhere.
+  installProviders: true
+  # Create or update the shipped ComponentDefinitions on start.
+  installCatalog: true
+  # Prometheus metrics (plain HTTP, unauthenticated) on :8080 behind a
+  # Service <fullname>-controller-metrics. Off, as the command's default.
+  metrics:
+    enabled: false
+    port: 8080
+  # Extra CV_* variables of the controller command. No AWS keys: the
+  # controller's credentials are its service account's IAM role.
+  extraEnv: []
+  extraEnvFrom: []
+  serviceAccount:
+    # Default: <fullname>-controller.
+    name: ""
+    # IRSA: the management role (aws.managementRoleArn), or a role that may
+    # assume the tenant roles.
+    # eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/cluster-vending-controller
+    annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  # A first guess; the informer cache for ~100 clusters is the reference.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  livenessProbe:
+    httpGet: {path: /healthz, port: health}
+    initialDelaySeconds: 15
+    periodSeconds: 20
+  readinessProbe:
+    httpGet: {path: /readyz, port: health}
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  terminationGracePeriodSeconds: 10
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+
+# ---------------------------------------------------------------------------
+# The live reader: `cluster-vending live` (PROP-02 5.5). Reads node lists and
+# totals from the workload clusters on request, for the API server only.
+# Always one replica with strategy Recreate (its views are process memory);
+# its own service account (cluster-vending-live), no AWS access.
+live:
+  enabled: true
+  service:
+    port: 8090
+  extraEnv: []
+  serviceAccount:
+    # Fixed name cluster-vending-live: the controller binds it in tenant
+    # namespaces. No IAM role annotation (the chart refuses one).
+    annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  # Views are bounded at 256 MiB, plus the pages of up to 8 builds in flight.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  livenessProbe:
+    httpGet: {path: /healthz, port: http}
+    periodSeconds: 20
+  readinessProbe:
+    httpGet: {path: /readyz, port: http}
+    periodSeconds: 10
+  terminationGracePeriodSeconds: 45
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+
+# ---------------------------------------------------------------------------
+# The console (ui/, Next.js standalone). The browser only talks to the
+# console's own origin; its server side proxies every API call
+# (/api/rpc/<service>/<method>) to the API Service, so
+# `kubectl port-forward svc/<fullname>-ui 3000:3000` is all a browser needs.
+ui:
+  enabled: true
+  image:
+    repository: ghcr.io/yindia/cluster-vending-ui
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  # The API the console's server side calls (CV_API_BASE_URL). Default: the
+  # server Service of this release.
+  apiBaseUrl: ""
+  # Web login (OIDC). Must match the API's auth: with platform.auth.mode
+  # required and this off, every call is refused. In production the console
+  # requires HTTPS URLs for AUTH_URL and the issuer: reach it through an
+  # Ingress with TLS then, not a plain-HTTP port-forward.
+  auth:
+    enabled: false
+    # The console's public origin, e.g. https://console.example.com.
+    url: ""
+    # The OIDC issuer (one of the API's auth.issuers).
+    issuer: ""
+    clientId: ""
+    scopes: ""
+    # A Secret with KEYCLOAK_CLIENT_SECRET and AUTH_SECRET (32+ random
+    # bytes). Required when enabled; never inlined in values.
+    existingSecret: ""
+  extraEnv: []
+  extraEnvFrom: []
+  service:
+    type: ClusterIP
+    port: 3000
+    annotations: {}
+  serviceAccount:
+    # Default: <fullname>-ui. It needs no Kubernetes API access.
+    name: ""
+    annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  # uid 1000 is the node user of the image.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  # The root filesystem is read-only; .next/cache and /tmp are emptyDirs.
+  securityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  livenessProbe:
+    tcpSocket: {port: http}
+    periodSeconds: 20
+  readinessProbe:
+    httpGet: {path: /favicon.ico, port: http}
+    periodSeconds: 10
+  terminationGracePeriodSeconds: 30
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  # Off by default. The console needs TLS in front of it when auth is on.
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: console.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+    #  - secretName: console-tls
+    #    hosts: [console.example.com]
+
+# ---------------------------------------------------------------------------
+networkPolicy:
+  # The live reader accepts only the API server's pods (PROP-02 7.4), and
+  # its egress is DNS and HTTPS (443, 6443). On by default, as config/live.
+  live: true
+  # The API server accepts the console's pods plus `server.from` peers
+  # (an ingress controller, in-cluster CLI users). Off by default: other
+  # in-cluster callers would be cut off. kubectl port-forward is not
+  # affected (it enters the pod's network namespace).
+  server:
+    enabled: false
+    from: []
+    # - namespaceSelector:
+    #     matchLabels:
+    #       kubernetes.io/metadata.name: ingress-nginx
+  # The console accepts `ui.from` peers only (an ingress controller).
+  ui:
+    enabled: false
+    from: []
+  # The controller's metrics port only from namespaces labelled
+  # metrics=enabled (config/network-policy); the probe port stays open.
+  controllerMetrics: false

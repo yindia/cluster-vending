@@ -1,0 +1,37 @@
+# For the platform operator: publish, withdraw and delete releases, set
+# what each channel offers and pause it, hold clusters, and keep the
+# component catalog (ComponentDefinitions). A release's content cannot be
+# changed once published (CEL on the CRD), whoever writes.
+# Status is the controller's. Bind it to the operators, not to tenants.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: release-admin
+rules:
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releases
+  - releasechannels
+  - releaseholds
+  - componentdefinitions
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releases/status
+  - releasechannels/status
+  - releaseholds/status
+  - componentdefinitions/status
+  verbs:
+  - get

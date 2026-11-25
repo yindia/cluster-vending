@@ -1,0 +1,15 @@
+{{- if .Values.rbac.userRoles }}
+{{- range $file := list "cluster_admin_role.yaml" "cluster_editor_role.yaml" "cluster_viewer_role.yaml" "network_admin_role.yaml" "network_editor_role.yaml" "network_viewer_role.yaml" "cloudaccount_admin_role.yaml" "cloudaccount_editor_role.yaml" "cloudaccount_viewer_role.yaml" "release_admin_role.yaml" "release_viewer_role.yaml" }}
+{{- $role := $.Files.Get (printf "files/rbac/%s" $file) | fromYaml }}
+---
+# For people, bound to nothing (config/rbac/{{ $file }}).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cv.name" (dict "root" $ "component" $role.metadata.name) }}
+  labels:
+    {{- include "cv.labels" (dict "root" $ "component" "rbac") | nindent 4 }}
+rules:
+  {{- toYaml $role.rules | nindent 2 }}
+{{- end }}
+{{- end }}

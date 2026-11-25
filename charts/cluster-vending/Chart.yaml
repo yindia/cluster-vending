@@ -1,0 +1,22 @@
+apiVersion: v2
+name: cluster-vending
+description: >-
+  The cluster-vending platform in a management cluster: the API server
+  (serve), the controller, the live reader (live) and the web console.
+type: application
+# The chart's own version (SemVer).
+version: 0.1.0
+# The release of the binary and the console images by default (image.tag and
+# ui.image.tag): `git describe --tags`, as `make build` stamps pkg/version.
+appVersion: "v0.1.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/yindia/cluster-vending
+sources:
+  - https://github.com/yindia/cluster-vending
+keywords:
+  - eks
+  - crossplane
+  - platform
+annotations:
+  # Crossplane is a prerequisite, not a dependency (README.md).
+  category: Infrastructure

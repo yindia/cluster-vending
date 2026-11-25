@@ -1,0 +1,15 @@
+{{- include "cv.validate" . }}
+{{- if or .Values.server.enabled .Values.controller.enabled }}
+# The settings file both `serve` and `controller` read (--config): one copy,
+# so they cannot disagree. Pods carry its checksum and roll on a change.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "platform") }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" (dict "root" . "component" "platform") | nindent 4 }}
+data:
+  platform.yaml: |
+    {{- include "cv.platformFile" . | nindent 4 }}
+{{- end }}

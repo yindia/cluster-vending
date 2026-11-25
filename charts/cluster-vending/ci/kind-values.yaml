@@ -1,0 +1,17 @@
+# Values for a local kind cluster (make helm-install-kind): the images
+# `make docker-build docker-build-ui` built, loaded with `make kind-load`,
+# and a placeholder management role. Kind has no IRSA, so the controller's
+# AWS calls fail until credentials are given (docs/local-development.md);
+# the API, the live reader and the console work without them.
+image:
+  repository: ghcr.io/yindia/cluster-vending
+  pullPolicy: Never
+ui:
+  image:
+    repository: ghcr.io/yindia/cluster-vending-ui
+    pullPolicy: Never
+aws:
+  managementRoleArn: arn:aws:iam::111122223333:role/crossplane-provider-aws
+log:
+  format: text
+  level: info

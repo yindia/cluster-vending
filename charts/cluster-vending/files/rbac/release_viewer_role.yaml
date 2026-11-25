@@ -1,0 +1,25 @@
+# Read the release objects: which releases exist, what each channel
+# offers, which clusters are held, and the component catalog.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-vending-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: release-viewer
+rules:
+- apiGroups:
+  - cloud.cluster-vending.io
+  resources:
+  - releases
+  - releasechannels
+  - releaseholds
+  - componentdefinitions
+  - releases/status
+  - releasechannels/status
+  - releaseholds/status
+  - componentdefinitions/status
+  verbs:
+  - get
+  - list
+  - watch

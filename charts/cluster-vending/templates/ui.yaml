@@ -1,0 +1,184 @@
+{{- if .Values.ui.enabled }}
+{{- $ctx := dict "root" . "component" "ui" }}
+{{- $u := .Values.ui }}
+{{- if and $u.auth.enabled (not $u.auth.existingSecret) }}
+{{- fail "ui.auth.enabled needs ui.auth.existingSecret (KEYCLOAK_CLIENT_SECRET and AUTH_SECRET)" }}
+{{- end }}
+{{- if and $u.auth.enabled (or (not $u.auth.url) (not $u.auth.issuer) (not $u.auth.clientId)) }}
+{{- fail "ui.auth.enabled needs ui.auth.url, ui.auth.issuer and ui.auth.clientId" }}
+{{- end }}
+# The console needs no Kubernetes API access: no token is mounted.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "cv.serviceAccountName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+  {{- with $u.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: false
+---
+# The console (ui/Dockerfile: ui/docker/serve.mjs in front of the Next.js
+# standalone server). The browser calls only this origin; /api/rpc/* is
+# proxied server-side to CV_API_BASE_URL.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $u.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cv.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: ui
+        {{- with $u.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "cv.selectorLabels" $ctx | nindent 8 }}
+        {{- with $u.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "cv.serviceAccountName" $ctx }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $u.terminationGracePeriodSeconds }}
+      {{- include "cv.podPlacement" $ctx | nindent 6 }}
+      containers:
+      - name: ui
+        image: {{ include "cv.uiImage" . }}
+        imagePullPolicy: {{ $u.image.pullPolicy }}
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: HOSTNAME
+          value: 0.0.0.0
+        - name: PORT
+          value: "3000"
+        - name: NEXT_TELEMETRY_DISABLED
+          value: "1"
+        # Server side only: the browser never sees or calls this URL.
+        - name: CV_API_BASE_URL
+          value: {{ include "cv.apiBaseURL" . | quote }}
+        - name: AUTH_ENABLED
+          value: {{ $u.auth.enabled | quote }}
+        {{- if $u.auth.enabled }}
+        - name: AUTH_URL
+          value: {{ $u.auth.url | quote }}
+        - name: KEYCLOAK_ISSUER
+          value: {{ $u.auth.issuer | quote }}
+        - name: KEYCLOAK_CLIENT_ID
+          value: {{ $u.auth.clientId | quote }}
+        {{- with $u.auth.scopes }}
+        - name: KEYCLOAK_SCOPES
+          value: {{ . | quote }}
+        {{- end }}
+        - name: KEYCLOAK_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ $u.auth.existingSecret }}
+              key: KEYCLOAK_CLIENT_SECRET
+        - name: AUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ $u.auth.existingSecret }}
+              key: AUTH_SECRET
+        {{- end }}
+        {{- with $u.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with $u.extraEnvFrom }}
+        envFrom:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+        volumeMounts:
+        # Next.js writes its cache here; the root filesystem is read-only.
+        - name: next-cache
+          mountPath: /app/.next/cache
+        - name: tmp
+          mountPath: /tmp
+        securityContext:
+          {{- toYaml $u.securityContext | nindent 10 }}
+        livenessProbe:
+          {{- toYaml $u.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml $u.readinessProbe | nindent 10 }}
+        resources:
+          {{- toYaml $u.resources | nindent 10 }}
+      volumes:
+      - name: next-cache
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+  {{- with $u.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $u.service.type }}
+  ports:
+  - name: http
+    port: {{ $u.service.port }}
+    protocol: TCP
+    targetPort: http
+  selector:
+    {{- include "cv.selectorLabels" $ctx | nindent 4 }}
+{{- if $u.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+  {{- with $u.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $u.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with $u.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+  {{- range $u.ingress.hosts }}
+  - host: {{ .host | quote }}
+    http:
+      paths:
+      {{- range .paths }}
+      - path: {{ .path }}
+        pathType: {{ .pathType }}
+        backend:
+          service:
+            name: {{ include "cv.name" $ctx }}
+            port:
+              name: http
+      {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

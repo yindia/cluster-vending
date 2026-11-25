@@ -1,0 +1,167 @@
+{{- if .Values.server.enabled }}
+{{- $ctx := dict "root" . "component" "server" }}
+{{- $s := .Values.server }}
+# The server's identity. No Kubernetes Secret access and no workload-cluster
+# credentials; an IAM role only for its own results reads (aws.serverRoleArn).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "cv.serviceAccountName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+  {{- with $s.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+# What `serve` does in the management cluster (config/server/base/role.yaml).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "server-role") }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+rules:
+  {{- include "cv.rules" (dict "root" . "file" "server_role.yaml") | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "cv.name" (dict "root" . "component" "server-rolebinding") }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "cv.name" (dict "root" . "component" "server-role") }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "cv.serviceAccountName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+---
+# `cluster-vending serve` (config/server/base/deployment.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $s.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cv.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: server
+        {{- include "cv.platformChecksum" . | nindent 8 }}
+        {{- with $s.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "cv.selectorLabels" $ctx | nindent 8 }}
+        {{- with $s.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "cv.serviceAccountName" $ctx }}
+      terminationGracePeriodSeconds: {{ $s.terminationGracePeriodSeconds }}
+      {{- include "cv.podPlacement" $ctx | nindent 6 }}
+      containers:
+      - name: server
+        image: {{ include "cv.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command:
+        - /cluster-vending
+        - serve
+        args:
+        - --config=/etc/cluster-vending/platform.yaml
+        env:
+        - name: CV_HTTP_ADDR
+          value: ":8080"
+        - name: CV_LOG_FORMAT
+          value: {{ .Values.log.format | quote }}
+        - name: CV_LOG_LEVEL
+          value: {{ .Values.log.level | quote }}
+        {{- if .Values.live.enabled }}
+        # The live reader, by its Service (node lists and totals read live).
+        - name: CV_LIVE_URL
+          value: {{ include "cv.liveURL" . | quote }}
+        {{- end }}
+        {{- with $s.extraEnv }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with $s.extraEnvFrom }}
+        envFrom:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        ports:
+        # Connect, gRPC and gRPC-Web (cleartext HTTP/1.1 and h2c), the
+        # probes and /metrics share this port.
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        volumeMounts:
+        - name: platform-config
+          mountPath: /etc/cluster-vending
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+        securityContext:
+          {{- toYaml $s.securityContext | nindent 10 }}
+        livenessProbe:
+          {{- toYaml $s.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml $s.readinessProbe | nindent 10 }}
+        startupProbe:
+          {{- toYaml $s.startupProbe | nindent 10 }}
+        resources:
+          {{- toYaml $s.resources | nindent 10 }}
+      volumes:
+      - name: platform-config
+        configMap:
+          name: {{ include "cv.name" (dict "root" . "component" "platform") }}
+      - name: tmp
+        emptyDir: {}
+---
+# Internal by default: with auth.mode none it accepts anonymous callers.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+  {{- with $s.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $s.service.type }}
+  ports:
+  - name: http
+    port: {{ $s.service.port }}
+    protocol: TCP
+    targetPort: http
+    appProtocol: kubernetes.io/h2c
+  selector:
+    {{- include "cv.selectorLabels" $ctx | nindent 4 }}
+{{- if $s.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+spec:
+  minAvailable: {{ $s.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "cv.selectorLabels" $ctx | nindent 6 }}
+{{- end }}
+{{- end }}

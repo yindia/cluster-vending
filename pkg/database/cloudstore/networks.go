@@ -293,15 +293,20 @@ func (r networks) Create(ctx context.Context, n *model.Network) error {
 // takes the object back: an imported row without its import plan must not
 // exist. A metadata write in between (the controller's finalizer) is no
 // failure: the status is set again on the object read back, while it is
-// still the one created (same UID).
+// still the one created (same UID). A status someone else (the
+// controller) wrote meanwhile is fresher and stays, unless the store's
+// carries a contract status (an import's): that is the store's alone.
 func (s store) insert(ctx context.Context, obj client.Object, set func()) error {
 	if err := s.c.Create(ctx, obj); err != nil {
 		return translate(err)
 	}
 	uid := obj.GetUID()
-	gone := false
+	gone, first, own := false, true, false
 	err := retry(func() error {
 		set()
+		if first {
+			first, own = false, statusOf(obj)["contractStatus"] != nil
+		}
 		err := s.c.Status().Update(ctx, obj)
 		if !apierrors.IsConflict(err) {
 			return err
@@ -312,6 +317,9 @@ func (s store) insert(ctx context.Context, obj client.Object, set func()) error 
 		}
 		if obj.GetUID() != uid {
 			return fmt.Errorf("%w: %s was replaced", repository.ErrConflict, obj.GetName())
+		}
+		if !own && len(statusOf(obj)) > 0 {
+			return nil // written by someone else already: not overwritten
 		}
 		return err
 	})
@@ -325,6 +333,17 @@ func (s store) insert(ctx context.Context, obj client.Object, set func()) error 
 		return translate(err)
 	}
 	return nil
+}
+
+// statusOf is obj's status as a map; empty when it has none (or cannot be
+// read).
+func statusOf(obj client.Object) map[string]any {
+	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+	if err != nil {
+		return nil
+	}
+	st, _ := u["status"].(map[string]any)
+	return st
 }
 
 func (r networks) Get(ctx context.Context, tenantID, id string) (*model.Network, error) {

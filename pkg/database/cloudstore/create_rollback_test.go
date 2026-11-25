@@ -18,6 +18,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
+	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
 func reservations(t *testing.T, k client.Client) []corev1.ConfigMap {
@@ -390,6 +391,72 @@ func TestCreateSurvivesFinalizerAddedBeforeStatusWrite(t *testing.T) {
 	n.Spec = document(t, networkSpec(n))
 	if err := s.Networks().Create(t.Context(), n); err != nil {
 		t.Fatalf("network create with a finalizer added meanwhile: %v", err)
+	}
+}
+
+// statusBeforeStore lets the "controller" write the status of every new
+// cluster (with write) between its create and the store's first status
+// write.
+func statusBeforeStore(t *testing.T, k client.Client, write func(*cloud.Cluster)) client.Client {
+	seen := map[string]bool{}
+	return interceptor.NewClient(k.(client.WithWatch), interceptor.Funcs{SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+		key := obj.GetNamespace() + "/" + obj.GetName()
+		if _, ok := obj.(*cloud.Cluster); ok && !seen[key] {
+			seen[key] = true
+			live := &cloud.Cluster{}
+			if err := c.Get(ctx, client.ObjectKeyFromObject(obj), live); err != nil {
+				t.Fatal(err)
+			}
+			write(live)
+			if err := c.SubResource(sub).Update(ctx, live); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return c.SubResource(sub).Update(ctx, obj, opts...)
+	}})
+}
+
+// The controller's status, written before the store's initial one, is
+// fresher: the store's retry must not overwrite it.
+func TestCreateKeepsStatusTheControllerWroteFirst(t *testing.T) {
+	w := newWorld(t)
+	const message = "written by the controller"
+	s := cloudstore.New(statusBeforeStore(t, w.k, func(c *cloud.Cluster) { c.Status.Message = message }))
+
+	if err := s.Clusters().Create(t.Context(), reservationCluster(t, w.network, "fresh")); err != nil {
+		t.Fatalf("create with the controller's status written meanwhile: %v", err)
+	}
+
+	live := &cloud.Cluster{}
+	if err := w.k.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: "fresh"}, live); err != nil {
+		t.Fatal(err)
+	}
+	if live.Status.Message != message {
+		t.Fatalf("status message %q, want the controller's %q", live.Status.Message, message)
+	}
+}
+
+// An import's status is the store's alone (what was found in the cloud):
+// a condition the controller wrote first does not keep it from landing.
+func TestCreateStillWritesImportStatusAfterControllerCondition(t *testing.T) {
+	w := newWorld(t)
+	s := cloudstore.New(statusBeforeStore(t, w.k, func(c *cloud.Cluster) {
+		c.Status.Conditions = append(c.Status.Conditions, metav1.Condition{Type: "Adopted", Status: metav1.ConditionFalse,
+			Reason: "Waiting", Message: "waiting", LastTransitionTime: metav1.Now()})
+	}))
+	row := reservationCluster(t, w.network, "imported")
+	row.Status = document(t, &cloudv1.ClusterStatus{Message: "found in the cloud"})
+
+	if err := s.Clusters().Create(t.Context(), row); err != nil {
+		t.Fatalf("import create with a controller condition written meanwhile: %v", err)
+	}
+
+	live := &cloud.Cluster{}
+	if err := w.k.Get(t.Context(), client.ObjectKey{Namespace: namespace, Name: "imported"}, live); err != nil {
+		t.Fatal(err)
+	}
+	if live.Status.ContractStatus == nil || !strings.Contains(string(live.Status.ContractStatus.Raw), "found in the cloud") {
+		t.Fatalf("the import's status did not land: %+v", live.Status)
 	}
 }
 

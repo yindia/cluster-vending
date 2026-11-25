@@ -1,7 +1,11 @@
 package catalog_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -206,3 +210,73 @@ func TestSyncTreatsCRDDefaultsAsUnedited(t *testing.T) {
 }
 
 func ptrTo[T any](v T) *T { return &v }
+
+// A build before the provider field hashed a definition without the key;
+// the API server fills in the CRD's default (aws) since. Such a
+// definition is unedited: this build's spec replaces it. One edited since
+// is still left alone.
+func TestSyncTreatsTheProviderDefaultAsUnedited(t *testing.T) {
+	old := spec("version one")
+	// What a build without the provider field recorded: the spec's JSON
+	// without the key.
+	raw, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := strings.Replace(string(raw), `,"provider":""`, "", 1)
+	if legacy == string(raw) {
+		t.Fatalf("no provider key in %s", raw)
+	}
+	sum := sha256.Sum256([]byte(legacy))
+	stored := func(name, description string) *cloudv1alpha1.ComponentDefinition {
+		s := old
+		s.Description = description
+		s.Provider = cloudv1alpha1.CloudProviderAWS // what the API server returns now
+		d := shipped(name, s)
+		d.Annotations[catalog.ShippedHashAnnotation] = hex.EncodeToString(sum[:])
+		return d
+	}
+	c := newClient(t, stored("kyverno", "version one"), stored("edited", "the platform team's"))
+	next := spec("version two")
+	next.Provider = cloudv1alpha1.CloudProviderAWS
+
+	res, err := catalog.Sync(t.Context(), c, []*cloudv1alpha1.ComponentDefinition{definition("kyverno", next), definition("edited", next)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := get(t, c, "kyverno"); got == nil || got.Spec.Description != "version two" {
+		t.Errorf("kyverno = %+v, want this build's spec (result %+v)", got, res)
+	}
+	if got := get(t, c, "edited"); got == nil || got.Spec.Description != "the platform team's" || !slices.Contains(res.Edited, "edited") {
+		t.Errorf("an edited definition was not left alone: %+v (result %+v)", got, res)
+	}
+}
+
+// management defaults to Tenant in the CRD: a tenant definition the build
+// ships without it comes back from the API server with Tenant set. That is
+// not an edit, and a definition not labelled shipped with that one
+// difference is the build's (adopted).
+func TestSyncTreatsTheManagementDefaultAsUnedited(t *testing.T) {
+	v1, v2 := spec("version one"), spec("version two")
+	stored := shipped("gpu-operator", v1)
+	stored.Spec.Management = cloudv1alpha1.ComponentManagementTenant
+	unlabelled := definition("kyverno-policies", v2)
+	unlabelled.Spec.Management = cloudv1alpha1.ComponentManagementTenant
+	c := newClient(t, stored, unlabelled)
+
+	res, err := catalog.Sync(t.Context(), c, []*cloudv1alpha1.ComponentDefinition{definition("gpu-operator", v2), definition("kyverno-policies", v2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := get(t, c, "gpu-operator"); got == nil || got.Spec.Description != "version two" {
+		t.Errorf("gpu-operator = %+v, want this build's spec (result %+v)", got, res)
+	}
+	if !slices.Contains(res.Adopted, "kyverno-policies") {
+		t.Errorf("kyverno-policies, equal but for the management default, was not adopted: %+v", res)
+	}
+	if catalog.SpecHash(v1) != catalog.SpecHash(stored.Spec) {
+		t.Error("a spec and the same spec with management at its default hash differently")
+	}
+}

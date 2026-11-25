@@ -68,12 +68,47 @@ func SpecHash(spec cloudv1alpha1.ComponentDefinitionSpec) string {
 	// definition: at its default it hashes as unset, or each shipped
 	// definition would look edited and never be updated or removed again.
 	// Add every such field here when the CRD gains one.
+	spec = withoutDefaults(spec)
+	return hashOf(spec)
+}
+
+// withoutDefaults is spec with the omitempty fields the CRD defaults, at
+// their default, unset: sequence (100) and management (Tenant, which tenant
+// definitions are shipped without).
+func withoutDefaults(spec cloudv1alpha1.ComponentDefinitionSpec) cloudv1alpha1.ComponentDefinitionSpec {
 	if spec.Sequence != nil && *spec.Sequence == cloudv1alpha1.DefaultComponentSequence {
 		spec.Sequence = nil
 	}
-	raw, _ := json.Marshal(spec) // these types always marshal
+	if spec.Management == cloudv1alpha1.ComponentManagementTenant {
+		spec.Management = ""
+	}
+	return spec
+}
+
+func hashOf(v any) string {
+	raw, _ := json.Marshal(v) // these types always marshal
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
+}
+
+// beforeProvider is a spec as builds before the provider field hashed it:
+// without the key. provider is no omitempty field, so the CRD's default
+// (aws) cannot be hashed as unset the way sequence is; the shadowing field
+// leaves the key out.
+type beforeProvider struct {
+	cloudv1alpha1.ComponentDefinitionSpec
+	Provider *string `json:"provider,omitempty"`
+}
+
+// specHashBeforeProvider is the hash an earlier build, one without the
+// provider field, recorded for spec; "" when spec is for another cloud
+// than the CRD's default, which no such build shipped.
+func specHashBeforeProvider(spec cloudv1alpha1.ComponentDefinitionSpec) string {
+	if spec.Provider != cloudv1alpha1.CloudProviderAWS {
+		return ""
+	}
+	spec.Disabled = false
+	return hashOf(beforeProvider{ComponentDefinitionSpec: withoutDefaults(spec)})
 }
 
 // Sync brings the management cluster's definitions to this build's (defs):
@@ -189,7 +224,10 @@ func isShipped(d *cloudv1alpha1.ComponentDefinition) bool {
 	return d.Labels[cloudv1alpha1.LabelShipped] == "true" && d.Annotations[ShippedHashAnnotation] != ""
 }
 
-// unedited: d's spec is still what the build that shipped it recorded.
+// unedited: d's spec is still what the build that shipped it recorded. A
+// build before the provider field recorded the hash without it; the API
+// server has filled in its default (aws) since, which is no edit.
 func unedited(d *cloudv1alpha1.ComponentDefinition) bool {
-	return d.Annotations[ShippedHashAnnotation] == SpecHash(d.Spec)
+	recorded := d.Annotations[ShippedHashAnnotation]
+	return recorded == SpecHash(d.Spec) || recorded != "" && recorded == specHashBeforeProvider(d.Spec)
 }

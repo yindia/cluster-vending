@@ -4,12 +4,14 @@ import (
 	"slices"
 	"testing"
 
+	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
 	awscwl "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchlogs/v1beta1"
 	awsec2 "github.com/upbound/provider-aws/v2/apis/namespaced/ec2/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	awskms "github.com/upbound/provider-aws/v2/apis/namespaced/kms/v1beta1"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/yindia/cluster-vending/pkg/crossplane"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -215,4 +217,47 @@ func TestAdoptedRolesAreRetained(t *testing.T) {
 			t.Errorf("carried-over %s is not retained", obj.GetName())
 		}
 	}
+}
+
+// A cluster imported before the carried-over policy attachments were
+// retained has them stored without RetainAnnotation. Owned at takeover,
+// they are still kept: every one is an extra policy on a role the import
+// adopted, which other clusters may use too.
+func TestOwnCarriedOverKeepsAttachmentsStoredBeforeTheyWereRetained(t *testing.T) {
+	objects := crossplaneaws.CarriedOver(clusterPlan(), crossplaneaws.CarriedOverResources{
+		RoleNames:     map[string]string{"cluster-role": "tf-cluster", "node-role": "tf-node"},
+		ExtraPolicies: map[string][]string{"node-role": {"arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"}},
+		LogGroupName:  "/aws/eks/prod/cluster",
+	})
+	for _, obj := range objects {
+		a := obj.GetAnnotations()
+		delete(a, crossplaneaws.RetainAnnotation) // as stored before the fix
+		obj.SetAnnotations(a)
+
+		crossplaneaws.OwnCarriedOver(obj)
+
+		got := policies(t, obj)
+		_, attachment := obj.(*awsiam.RolePolicyAttachment)
+		want := crossplaneaws.PolicyAll
+		if attachment {
+			want = crossplaneaws.PolicyNoDelete
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%T %s: policies %v, want %v", obj, obj.GetName(), got, want)
+		}
+		if attachment && obj.GetAnnotations()[crossplaneaws.RetainAnnotation] != "true" {
+			t.Errorf("attachment %s is not marked retained: %v", obj.GetName(), obj.GetAnnotations())
+		}
+	}
+}
+
+func policies(t *testing.T, obj client.Object) xpv2.ManagementPolicies {
+	t.Helper()
+	m, ok := obj.(interface {
+		GetManagementPolicies() xpv2.ManagementPolicies
+	})
+	if !ok {
+		t.Fatalf("%T is not a managed resource", obj)
+	}
+	return m.GetManagementPolicies()
 }

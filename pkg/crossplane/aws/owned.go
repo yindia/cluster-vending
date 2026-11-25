@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
@@ -35,6 +36,23 @@ func Own(obj client.Object) bool {
 	}
 	m.SetManagementPolicies(slices.Clone(PolicyAll))
 	return true
+}
+
+// OwnCarriedOver is Own for a carried-over object of a taken-over cluster
+// (CarriedOver). Its policy attachments are the extra policies on the
+// roles the import adopted, which other clusters may use too: they are
+// always retained, also when stored by an import from before CarriedOver
+// marked them so.
+func OwnCarriedOver(obj client.Object) bool {
+	if _, ok := obj.(*awsiam.RolePolicyAttachment); ok {
+		a := maps.Clone(obj.GetAnnotations())
+		if a == nil {
+			a = map[string]string{}
+		}
+		a[RetainAnnotation] = "true"
+		obj.SetAnnotations(a)
+	}
+	return Own(obj)
 }
 
 // OwnedNetworkResources renders n as the managed resources of a network

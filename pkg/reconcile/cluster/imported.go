@@ -106,8 +106,8 @@ func Adoption(row *model.Cluster) crossplaneaws.Adoption {
 // withCarriedOver is set (what the cluster's spec renders) preceded by the
 // carried-over objects of a taken-over cluster: the objects of its import
 // that no spec field describes (crossplane.CarriedOverAnnotation), from
-// the import's stored objects, owned (crossplaneaws.Own: full management,
-// without Delete for a retained one) and otherwise exactly as they were
+// the import's stored objects, owned (crossplaneaws.OwnCarriedOver: full
+// management, without Delete for a retained one and for policy attachments) and otherwise exactly as they were
 // imported. A takeover therefore applies them as it applies everything
 // else: nothing is read and edited in place, and nothing is looked up in
 // the cloud. They are in the cluster's inventory as kept, so they are
@@ -139,7 +139,7 @@ func (s *Reconciler) withCarriedOver(ctx context.Context, row *model.Cluster, se
 		if obj.GetAnnotations()[crossplane.CarriedOverAnnotation] != "true" || rendered[fmt.Sprintf("%T/%s", obj, obj.GetName())] {
 			continue
 		}
-		crossplaneaws.Own(obj)
+		crossplaneaws.OwnCarriedOver(obj)
 		carried = append(carried, obj)
 	}
 	return append(importSet(carried), set...), nil

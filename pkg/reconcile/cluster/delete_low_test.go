@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	awsevents "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchevents/v1beta1"
 	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
@@ -42,6 +43,37 @@ func TestNodeStagePastOnlyByKarpenterObjects(t *testing.T) {
 	gone := queue
 	gone.GoneAt = ptr.To(time.Now())
 	require.True(t, removal(nil, gone, old).past())
+}
+
+// A Karpenter object an update replaced (a rule renamed), still being
+// deleted when the cluster's deletion arrives, does not end the node stage:
+// the deletion's removal of Karpenter's objects deletes every one no Usage
+// holds (its targets, queue policy, access entry) at once, and those are
+// still there.
+func TestNodeStageNotPastByReplacedKarpenterObject(t *testing.T) {
+	prefix := "p"
+	deleting := cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING
+	ready := cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY
+	missing := cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING
+	queue := model.ManagedResource{Kind: awssqs.Queue_Kind, Name: prefix + "-karpenter"}
+	oldRule := model.ManagedResource{Kind: awsevents.Rule_Kind, Name: prefix + "-karpenter-spot-old"}
+	target := model.ManagedResource{Kind: awsevents.Target_Kind, Name: prefix + "-karpenter-spot-target"}
+	removal := func(states map[string]cloudv1.ManagedResourceState, records ...model.ManagedResource) *clusterRemoval {
+		c := &clusterRemoval{records: records, prefix: prefix, views: map[string]*cloudv1.ManagedResource{}}
+		for _, r := range records {
+			c.views[viewKey(r.Kind, r.Name)] = &cloudv1.ManagedResource{Kind: r.Kind, Name: r.Name, State: states[r.Name]}
+		}
+		return c
+	}
+	for _, r := range []model.ManagedResource{oldRule, target} {
+		require.Equal(t, crossplaneaws.DeleteStageKarpenter, crossplaneaws.ClusterObjectDeleteStage(prefix, r.Kind, r.Name))
+	}
+
+	require.False(t, removal(map[string]cloudv1.ManagedResourceState{queue.Name: ready, oldRule.Name: deleting, target.Name: ready},
+		queue, oldRule, target).past(), "a replaced rule being deleted is not the deletion's")
+	require.True(t, removal(map[string]cloudv1.ManagedResourceState{queue.Name: ready, oldRule.Name: deleting, target.Name: deleting},
+		queue, oldRule, target).past(), "the deletion deleted the target; the queue waits for its users")
+	require.True(t, removal(map[string]cloudv1.ManagedResourceState{queue.Name: deleting, target.Name: missing}, queue, target).past())
 }
 
 // Karpenter's stage is fixed (it is removed after the node groups): it is

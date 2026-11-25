@@ -6,6 +6,9 @@ import (
 	"sync"
 	"time"
 
+	awsevents "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchevents/v1beta1"
+	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
+	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -69,22 +72,46 @@ func (c *clusterRemoval) left(rs []model.ManagedResource) []model.ManagedResourc
 	return out
 }
 
-// past reports whether Karpenter's stage began: an object of it is being
-// deleted, or went. It is the node groups' stage's memory (nothing else is
-// stored for it): it is not run again once what comes after it started,
-// however the workload cluster looks then. Only Karpenter's objects count:
-// a later stage's (a node group an update replaced) may be going since
-// before the cluster's deletion was asked for.
+// past reports whether Karpenter's stage began: an object of it went
+// (GoneAt is stored only by the deletion's stages after this one), or is
+// being deleted while none of its objects that no Usage holds is left. It is
+// the node groups' stage's memory (nothing else is stored for it): it is not
+// run again once what comes after it started, however the workload cluster
+// looks then. Only Karpenter's objects count: a later stage's (a node group
+// an update replaced) may be going since before the cluster's deletion was
+// asked for. So may one of Karpenter's that an update replaced (a renamed
+// rule): the deletion's own removal deletes every Karpenter object at once,
+// and those no Usage holds (targets, queue policy, access entry) go into
+// deletion at once, so one of them still there means the deletion did not
+// start it.
 func (c *clusterRemoval) past() bool {
-	for _, r := range c.records {
-		if r.Kind == managed.UsageKind || crossplaneaws.ClusterObjectDeleteStage(c.prefix, r.Kind, r.Name) != crossplaneaws.DeleteStageKarpenter {
-			continue
-		}
-		if v := c.views[viewKey(r.Kind, r.Name)]; r.GoneAt != nil || v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING {
+	deleting, unheldLeft := false, false
+	for _, r := range c.stage(crossplaneaws.DeleteStageKarpenter) {
+		if r.GoneAt != nil {
 			return true
 		}
+		switch c.views[viewKey(r.Kind, r.Name)].GetState() {
+		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_DELETING:
+			deleting = true
+		case cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_MISSING:
+		default:
+			unheldLeft = unheldLeft || !usageHeld(r.Kind)
+		}
 	}
-	return false
+	return deleting && !unheldLeft
+}
+
+// usageHeld reports whether objects of the kind may be the object of a
+// Karpenter Usage (crossplaneaws karpenterUsagePairs), whose deletion the
+// Usage webhook refuses until its users are gone: the node role and its
+// policy attachments, the queue, the rules. Targets, the queue policy and
+// the access entry are only ever users, deleted when asked.
+func usageHeld(kind string) bool {
+	switch kind {
+	case awssqs.QueuePolicy_Kind, awsevents.Target_Kind, awseks.AccessEntry_Kind:
+		return false
+	}
+	return true
 }
 
 // removeStage deletes the cluster's objects of one stage (Karpenter's, the

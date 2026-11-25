@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -21,8 +20,9 @@ import (
 //     pool's limits with headroom, and every pod must fit the largest shape
 //     the pool may launch.
 //
-// Until components are placed on the pool (phase 3) the system group still
-// runs everything, so CheckSystemGroupSizing stays as well.
+// CheckSystemGroupSizing sizes what runs on the system group (everything
+// not placed on the platform pool, with the add-ons); CheckBootstrapSizing
+// the narrower bootstrap set of PROP-03 at the group's fixed size.
 
 // memoryClassFactor is how far apart the memory of the types of the
 // bootstrap group may be: a list is a fallback for a capacity shortage, so
@@ -94,22 +94,12 @@ func CheckBootstrapSizing(defs []component.Definition, group config.SystemNodeGr
 			bootstrap = append(bootstrap, d)
 		}
 	}
-	return fitGroup(bootstrap, shape, typeName, int64(group.MinSize), "bootstrap group")
+	return fitGroup(bootstrap, func(SizingLine) bool { return true }, shape, typeName, int64(group.MinSize), "bootstrap group")
 }
 
 // PlatformFillLimit is the share of the pool's limits the platform set
 // may request at its minimum replicas; the rest is for growth and surge.
 const PlatformFillLimit = 0.85
-
-// notOnThePool are the sizing rows that do not run on the platform pool:
-// Karpenter, cluster-autoscaler (until it leaves the default set), the
-// DaemonSets and the add-ons.
-func notOnThePool(l SizingLine) bool {
-	return l.Name == karpenterName || l.Name == "cluster-autoscaler" ||
-		strings.HasSuffix(l.Name, "(add-on)") || strings.HasSuffix(l.Name, "(add-on DaemonSet)") ||
-		slices.ContainsFunc(addonDaemonSetsPer, func(d SizingLine) bool { return d.Name == l.Name }) ||
-		platformDaemonSets[l.Name].name != ""
-}
 
 // CheckPlatformSizing reports what keeps the enabled platform components
 // (at their minimum replicas) from fitting the platform pool: requests
@@ -123,8 +113,9 @@ func CheckPlatformSizing(defs []component.Definition, pool config.PlatformNodePo
 	var sum Usage
 	var table strings.Builder
 	var kept []SizingLine
+	onPool := poolRows(defs)
 	for _, l := range rows {
-		if notOnThePool(l) {
+		if !onPool(l) {
 			continue
 		}
 		kept = append(kept, l)

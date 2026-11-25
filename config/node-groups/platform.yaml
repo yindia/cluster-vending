@@ -23,9 +23,10 @@ nodeGroups:
     # cannot change them in place). A list of one architecture and one
     # vCPU/memory class, so a capacity shortage of one type does not block creation.
     instanceTypes: [t3.medium]
-    # The fixed size, at least 2: Karpenter runs two replicas with
-    # anti-affinity. Applies to every cluster, in place. (maxSize is
-    # deprecated: a value still set is warned about.)
+    # The static size (min = max = desired), at least 2: Karpenter runs two
+    # replicas with anti-affinity. Nothing autoscales the group. Applies to
+    # every cluster, in place. (maxSize is ignored: a value still set is
+    # warned about.)
     minSize: 2
     # New clusters only: ON_DEMAND or SPOT.
     capacityType: ON_DEMAND

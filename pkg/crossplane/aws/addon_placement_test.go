@@ -59,6 +59,42 @@ var (
 	}
 )
 
+// placedAddons are the add-ons placed on the default node pool besides
+// coredns and the EBS controller, as they render with sel as their
+// nodeSelector and tol as their tolerations (nil: that key unset). Their
+// charts have no default tolerations.
+func placedAddons(sel any, tol []any) map[string]map[string]any {
+	at := func() map[string]any {
+		m := map[string]any{}
+		if sel != nil {
+			m["nodeSelector"] = sel
+		}
+		if tol != nil {
+			m["tolerations"] = tol
+		}
+		return m
+	}
+	certManager := at()
+	certManager["cainjector"], certManager["webhook"] = at(), at()
+	return map[string]map[string]any{
+		"metrics-server": at(), "kube-state-metrics": at(), "snapshot-controller": at(), "cert-manager": certManager,
+		"aws-efs-csi-driver": {"controller": at()}, "aws-fsx-csi-driver": {"controller": at()},
+		"aws-mountpoint-s3-csi-driver": {"controller": at()},
+	}
+}
+
+// with is want plus the add-ons in more that want does not name.
+func with(want map[string]map[string]any, more map[string]map[string]any) map[string]map[string]any {
+	out := map[string]map[string]any{}
+	for k, v := range more {
+		out[k] = v
+	}
+	for k, v := range want {
+		out[k] = v
+	}
+	return out
+}
+
 func TestAddonsFollowTheDefaultNodePool(t *testing.T) {
 	labels := map[string]string{"role": "system", "team": "platform"}
 	taints := []crossplaneaws.TaintPlan{
@@ -77,35 +113,35 @@ func TestAddonsFollowTheDefaultNodePool(t *testing.T) {
 			configurations: map[string]string{"coredns": `{"replicaCount":3}`},
 			want:           map[string]map[string]any{"coredns": {"replicaCount": float64(3)}}},
 		{name: "labels and taints", labels: labels, taints: taints,
-			want: map[string]map[string]any{
+			want: with(map[string]map[string]any{
 				"coredns": {"nodeSelector": selector, "tolerations": append(append([]any{}, poolTolerations...), corednsDefaults...)},
 				"aws-ebs-csi-driver": {"controller": map[string]any{"nodeSelector": selector,
 					"tolerations": append(append([]any{}, poolTolerations...), ebsDefaults...)}},
-			}},
+			}, placedAddons(selector, poolTolerations))},
 		{name: "labels only: no tolerations", labels: labels,
-			want: map[string]map[string]any{
+			want: with(map[string]map[string]any{
 				"coredns":            {"nodeSelector": selector},
 				"aws-ebs-csi-driver": {"controller": map[string]any{"nodeSelector": selector}},
-			}},
+			}, placedAddons(selector, nil))},
 		{name: "taints only: no nodeSelector", taints: taints[:1],
-			want: map[string]map[string]any{
+			want: with(map[string]map[string]any{
 				"coredns": {"tolerations": append([]any{poolTolerations[0]}, corednsDefaults...)},
 				"aws-ebs-csi-driver": {"controller": map[string]any{
 					"tolerations": append([]any{poolTolerations[0]}, ebsDefaults...)}},
-			}},
+			}, placedAddons(nil, poolTolerations[:1]))},
 		{name: "the tenant's settings stay, and its own placement wins", labels: labels, taints: taints,
 			configurations: map[string]string{
 				"coredns":            "replicaCount: 3\nnodeSelector:\n  mine: \"yes\"\n", // YAML is accepted
 				"aws-ebs-csi-driver": `{"controller":{"extraVolumeTags":{"a":"b"},"tolerations":[]},"node":{"tolerateAllTaints":true}}`,
 				"vpc-cni":            `{"env":{"ENABLE_PREFIX_DELEGATION":"true"}}`,
 			},
-			want: map[string]map[string]any{
+			want: with(map[string]map[string]any{
 				"coredns": {"replicaCount": float64(3), "nodeSelector": map[string]any{"mine": "yes"},
 					"tolerations": append(append([]any{}, poolTolerations...), corednsDefaults...)},
 				"aws-ebs-csi-driver": {"controller": map[string]any{"extraVolumeTags": map[string]any{"a": "b"},
 					"tolerations": []any{}, "nodeSelector": selector}, "node": map[string]any{"tolerateAllTaints": true}},
 				"vpc-cni": {"env": map[string]any{"ENABLE_PREFIX_DELEGATION": "true"}},
-			}},
+			}, placedAddons(selector, poolTolerations))},
 		{name: "an imported cluster's add-ons stay where they are", labels: labels, taints: taints, imported: true,
 			want: map[string]map[string]any{}},
 	}
@@ -189,28 +225,32 @@ func TestAddonsOnTheSystemPool(t *testing.T) {
 		imported       bool
 		want           map[string]map[string]any
 	}{
-		{name: "coredns and the EBS controller on the system group",
-			want: map[string]map[string]any{
+		{name: "the add-on controllers on the system group",
+			want: with(map[string]map[string]any{
 				"coredns": {"nodeSelector": system, "tolerations": append([]any{systemToleration}, corednsDefaults...)},
 				"aws-ebs-csi-driver": {"controller": map[string]any{"nodeSelector": system,
 					"tolerations": append([]any{systemToleration}, ebsDefaults...)}},
-			}},
+			}, placedAddons(system, []any{systemToleration}))},
 		{name: "the tenant's own placement wins",
 			configurations: map[string]string{
 				"coredns":            `{"nodeSelector":{"mine":"yes"}}`,
 				"aws-ebs-csi-driver": `{"controller":{"tolerations":[],"nodeSelector":{"a":"b"}}}`,
+				"cert-manager":       `{"nodeSelector":{"x":"y"},"cainjector":{"tolerations":[]}}`,
 			},
-			want: map[string]map[string]any{
+			want: with(map[string]map[string]any{
 				"coredns":            {"nodeSelector": map[string]any{"mine": "yes"}, "tolerations": append([]any{systemToleration}, corednsDefaults...)},
 				"aws-ebs-csi-driver": {"controller": map[string]any{"tolerations": []any{}, "nodeSelector": map[string]any{"a": "b"}}},
-			}},
+				"cert-manager": {"nodeSelector": map[string]any{"x": "y"}, "tolerations": []any{systemToleration},
+					"cainjector": map[string]any{"nodeSelector": system, "tolerations": []any{}},
+					"webhook":    map[string]any{"nodeSelector": system, "tolerations": []any{systemToleration}}},
+			}, placedAddons(system, []any{systemToleration}))},
 		{name: "an imported cluster's add-ons stay where they are", imported: true, want: map[string]map[string]any{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := planWithAddons(tt.configurations)
 			p.Karpenter = true
-			p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, 2, 6)
+			p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, 2)
 			if tt.imported {
 				p.ExternalNames = map[string]string{"prod-1a2b3c4d-default": "ng-1"}
 			}

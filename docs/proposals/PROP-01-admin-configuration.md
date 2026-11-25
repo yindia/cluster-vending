@@ -159,8 +159,7 @@ nodeGroups:
   system:                 # the bootstrap group. New clusters only: instanceTypes, capacityType, diskSizeGiB. In place: minSize.
     instanceTypes: [t3.medium]   # a list; same architecture and vCPU/memory class
     minSize: 2                   # fixed size: desired = min = max
-    # maxSize: deprecated. Kept as cluster-autoscaler's ceiling until PROP-03 phase 4 removes
-    # the autoscaler; after that it is ignored with a warning.
+    # maxSize: ignored with a warning (cluster-autoscaler is removed from the catalog).
     capacityType: ON_DEMAND
     diskSizeGiB: 0
   platform:               # the Karpenter NodePool platform-pool; keys in PROP-03 4.4
@@ -301,7 +300,7 @@ What "does not act on it" means:
 | Channel `release` or `promotion` | The channel offers a new release | Existing: Kubernetes rollout, then release moves. |
 | Channel `policy`, `paused` | Next pass | `paused` starts nothing new. |
 | `nodeGroups.system` `minSize` | In place | Existing code-change rollout (the managed node group is a Crossplane object). After PROP-03 phase 4 a shrink goes only through PROP-03's drain check (M3). |
-| `nodeGroups.system` `maxSize` (deprecated) | In place, until PROP-03 phase 4 | Existing code-change rollout, as cluster-autoscaler's ceiling. Ignored with a warning after the autoscaler is removed. |
+| `nodeGroups.system` `maxSize` (ignored) | None | Ignored with a warning: cluster-autoscaler is removed from the catalog and the group is static (min = max = desired = `minSize`). |
 | `nodeGroups.system` `instanceTypes`, `capacityType`, `diskSizeGiB` | New clusters only | Not rolled out (EKS cannot change them in place). |
 | `nodeGroups.platform` (PROP-03) | The EC2NodeClass and NodePool `platform-pool` | Today: applied on each cluster's next node pass. The two objects are applied to the workload cluster like tenant pools (`pkg/reconcile/cluster/nodegroups_platform_pool.go`), not as Crossplane objects, so the code-change fingerprint does not cover them. Phase 5 adds the rendered pool as one entry of the catalog fingerprint, so a change is gated like a definition change. |
 | `nodeGroups.karpenter` defaults | New groups, and groups that leave the field unset | Existing code-change rollout. |

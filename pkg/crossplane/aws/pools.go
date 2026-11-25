@@ -1,31 +1,27 @@
 package aws
 
 // The node pools of a cluster (docs/architecture.md#node-layout): the
-// default managed node group ("system") runs Karpenter, CoreDNS, every
-// platform component, the tenant's components and the EKS add-on
-// controllers, between a minimum and a maximum size that cluster-autoscaler
-// moves it in; a user's own Karpenter node groups run
-// their workloads. The system group's nodes carry the label
+// default managed node group ("system") runs phase 1 of the install order,
+// Karpenter and the EKS add-on controllers, at a static size the platform
+// admin sets (nothing autoscales it); Karpenter's platform pool (PoolPlatform) runs every other
+// platform component and the tenant's components; a user's own Karpenter
+// node groups run their workloads. The system group's nodes carry the label
 // PoolLabelKey=system and are tainted with it (NoSchedule); a user group's
 // nodes carry the label PoolLabelKey=<name>.
 const (
 	// PoolLabelKey is the node label (and taint key) that names a pool.
 	PoolLabelKey = "node.cluster-vending.io/pool"
 	// PoolSystem is the default managed node group, the platform's only
-	// node group.
+	// EKS managed node group.
 	PoolSystem = "system"
 	// PoolPlatform is the name of the platform pool (PROP-03): the Karpenter
 	// NodePool and EC2NodeClass, and the value of its node label and taint.
 	// It is not the legacy "platform" the legacy gate removes.
 	PoolPlatform = "platform-pool"
-	// DefaultSystemPoolMin is the size of the default managed node group at
-	// creation, and its minimum, unless the admin sets another
-	// (--system-node-group-min-size).
-	DefaultSystemPoolMin = 2
-	// DefaultSystemPoolMax is how far cluster-autoscaler may grow the group
-	// unless the admin sets another (--system-node-group-max-size).
-	DefaultSystemPoolMax = 6
-	// MinSystemPoolSize is the least the admin may set as the minimum:
+	// DefaultSystemPoolSize is the static size of the default managed node
+	// group unless the admin sets another (--system-node-group-min-size).
+	DefaultSystemPoolSize = 2
+	// MinSystemPoolSize is the least the admin may set as the size:
 	// Karpenter runs two replicas with anti-affinity, one on each of two
 	// nodes.
 	MinSystemPoolSize = 2
@@ -52,32 +48,28 @@ func PoolTolerations(pool string) []map[string]any {
 	return TolerationsOf([]TaintPlan{PoolTaint(pool)})
 }
 
-// SystemPoolBounds is the minimum and maximum size the system group has
-// when the admin sets them: the minimum itself, or DefaultSystemPoolMin
-// when it is below MinSystemPoolSize (unset); the maximum itself, or
-// DefaultSystemPoolMax when unset (not above 0) and never below the
-// minimum.
-func SystemPoolBounds(minSize, maxSize int) (int, int) {
-	if minSize < MinSystemPoolSize {
-		minSize = DefaultSystemPoolMin
+// SystemPoolSize is the static size of the system group for the admin's
+// setting: the size itself, or DefaultSystemPoolSize when it is below
+// MinSystemPoolSize (unset).
+func SystemPoolSize(size int) int {
+	if size < MinSystemPoolSize {
+		return DefaultSystemPoolSize
 	}
-	if maxSize <= 0 {
-		maxSize = max(DefaultSystemPoolMax, minSize)
-	}
-	return minSize, max(maxSize, minSize)
+	return size
 }
 
 // FixedSystemNodePool is plan with the default node group's placement and
-// size the platform fixes: the system label and taint, min and max from
-// SystemPoolBounds, and desired = min. Desired is only the size at creation:
-// the apply sends it in initProvider (DesiredSizeAtCreateOnly), so after
-// that the node count is cluster-autoscaler's. Instance types, capacity
-// type, AMI, disk and launch template are the plan's own (EKS cannot change
-// them in place; these it can).
-func FixedSystemNodePool(plan NodePoolPlan, minSize, maxSize int) NodePoolPlan {
-	minSize, maxSize = SystemPoolBounds(minSize, maxSize)
+// size the platform fixes: the system label and taint, and one static size
+// (SystemPoolSize) as min, max and desired. Nothing autoscales the group
+// (Karpenter scales every other pool), and the apply sends desired in
+// forProvider (ClusterSet), so a change of the size, or a group that grew
+// under the former cluster-autoscaler, is applied in place. Instance types,
+// capacity type, AMI, disk and launch template are the plan's own (EKS
+// cannot change them in place; the size it can).
+func FixedSystemNodePool(plan NodePoolPlan, size int) NodePoolPlan {
+	size = SystemPoolSize(size)
 	plan.Labels = PoolLabels(PoolSystem)
 	plan.Taints = []TaintPlan{PoolTaint(PoolSystem)}
-	plan.MinSize, plan.MaxSize, plan.Desired = minSize, maxSize, minSize
+	plan.MinSize, plan.MaxSize, plan.Desired = size, size, size
 	return plan
 }

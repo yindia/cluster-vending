@@ -13,7 +13,7 @@ var zonesAB = []string{"use1-az1", "use1-az2"}
 func assertSystemPool(t *testing.T, pool *cloudv1.NodePoolSpec) {
 	t.Helper()
 	sc := pool.GetScalingConfig()
-	assertSystemSize(t, sc, 2, 6)
+	assertSystemSize(t, sc, 2)
 	if !reflect.DeepEqual(pool.GetLabels(), map[string]string{"node.cluster-vending.io/pool": "system"}) {
 		t.Errorf("labels = %v", pool.GetLabels())
 	}
@@ -23,11 +23,11 @@ func assertSystemPool(t *testing.T, pool *cloudv1.NodePoolSpec) {
 	}
 }
 
-// assertSystemSize: min and max as given, desired = min (the size at creation).
-func assertSystemSize(t *testing.T, sc *cloudv1.ScalingConfig, minSize, maxSize uint32) {
+// assertSystemSize: the one static size as min, max and desired.
+func assertSystemSize(t *testing.T, sc *cloudv1.ScalingConfig, size uint32) {
 	t.Helper()
-	if sc.GetMinSize() != minSize || sc.GetMaxSize() != maxSize || sc.DesiredSize == nil || sc.GetDesiredSize() != minSize {
-		t.Errorf("scaling = %v, want min %d max %d desired %d", sc, minSize, maxSize, minSize)
+	if sc.GetMinSize() != size || sc.GetMaxSize() != size || sc.DesiredSize == nil || sc.GetDesiredSize() != size {
+		t.Errorf("scaling = %v, want %d/%d/%d", sc, size, size, size)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestRenderPlanFixesTheDefaultNodeGroupOfAnExistingCluster(t *testing.T) {
 	plan := RenderPlan(spec, []string{"subnet-a"}, base)
 
 	want := crossplaneaws.FixedSystemNodePool(crossplaneaws.NodePoolPlan{InstanceTypes: []string{"m6i.large"}, CapacityType: "ON_DEMAND",
-		AMIType: "AL2023_x86_64_STANDARD"}, 2, 6)
+		AMIType: "AL2023_x86_64_STANDARD"}, 2)
 	if !reflect.DeepEqual(plan.NodePool, want) {
 		t.Errorf("node pool = %+v\nwant %+v", plan.NodePool, want)
 	}
@@ -173,7 +173,7 @@ func TestResolveSpecWithTheAdminsSystemNodeGroupSettings(t *testing.T) {
 	in := minimalSpec()
 	in.DefaultNodePool = nil
 
-	spec, err := ResolveSpecWith(in, zonesAB, SystemPool{MinSize: 5, MaxSize: 9, InstanceTypes: []string{"m7i.large", "m6i.large"}})
+	spec, err := ResolveSpecWith(in, zonesAB, SystemPool{Size: 5, InstanceTypes: []string{"m7i.large", "m6i.large"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,11 +181,11 @@ func TestResolveSpecWithTheAdminsSystemNodeGroupSettings(t *testing.T) {
 	if got := spec.GetDefaultNodePool().GetInstanceTypes(); !reflect.DeepEqual(got, []string{"m7i.large", "m6i.large"}) {
 		t.Errorf("instance types = %v, want the admin's list", got)
 	}
-	assertSystemSize(t, spec.GetDefaultNodePool().GetScalingConfig(), 5, 9)
+	assertSystemSize(t, spec.GetDefaultNodePool().GetScalingConfig(), 5)
 
 	named := minimalSpec()
 	named.DefaultNodePool.InstanceTypes = []string{"c7i.xlarge"}
-	spec, err = ResolveSpecWith(named, zonesAB, SystemPool{MinSize: 4, InstanceTypes: []string{"m7i.large"}})
+	spec, err = ResolveSpecWith(named, zonesAB, SystemPool{Size: 4, InstanceTypes: []string{"m7i.large"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,21 +193,20 @@ func TestResolveSpecWithTheAdminsSystemNodeGroupSettings(t *testing.T) {
 		t.Errorf("the request's instance type was replaced: %v", got)
 	}
 
-	// Unset (or below the minimum): the defaults.
-	spec, err = ResolveSpecWith(in, zonesAB, SystemPool{MinSize: 1})
+	// Unset (or below the least): the default.
+	spec, err = ResolveSpecWith(in, zonesAB, SystemPool{Size: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertSystemSize(t, spec.GetDefaultNodePool().GetScalingConfig(), 2, 6)
+	assertSystemSize(t, spec.GetDefaultNodePool().GetScalingConfig(), 2)
 	if got := spec.GetDefaultNodePool().GetInstanceTypes(); !reflect.DeepEqual(got, []string{"t3.medium"}) {
 		t.Errorf("instance types = %v", got)
 	}
 }
 
 // A cluster created with the former layout stores t3.medium and a fixed 2:
-// the admin's min and max move it in place (the render takes the plan's
-// bounds), desired is the minimum, which the apply sends at creation only;
-// its instance type, capacity and AMI stay, so the node group keeps its
+// the admin's static size moves it in place (the render takes the plan's
+// size as min, max and desired, which the apply sends as is); its instance type, capacity and AMI stay, so the node group keeps its
 // name and is not replaced, and a changed instance type default never
 // reaches it.
 func TestSystemNodeGroupSizeChangesInPlaceOnAnExistingCluster(t *testing.T) {
@@ -217,12 +216,13 @@ func TestSystemNodeGroupSizeChangesInPlaceOnAnExistingCluster(t *testing.T) {
 	spec := mustResolveWithout(t, stored)
 	base := crossplaneawsBase()
 	before := RenderPlan(spec, []string{"subnet-a"}, base)
-	base.SystemPoolMin, base.SystemPoolMax = 4, 9
+	base.SystemPoolSize = 4
 
 	after := RenderPlan(spec, []string{"subnet-a"}, base)
 
-	if before.NodePool.MinSize != 2 || before.NodePool.MaxSize != 6 || after.NodePool.MinSize != 4 || after.NodePool.MaxSize != 9 || after.NodePool.Desired != 4 {
-		t.Errorf("sizes before %+v after %+v, want the plan's bounds (default 2..6, then 4..9)", before.NodePool, after.NodePool)
+	if before.NodePool.MinSize != 2 || before.NodePool.MaxSize != 2 || before.NodePool.Desired != 2 ||
+		after.NodePool.MinSize != 4 || after.NodePool.MaxSize != 4 || after.NodePool.Desired != 4 {
+		t.Errorf("sizes before %+v after %+v, want the plan's size (default 2, then 4)", before.NodePool, after.NodePool)
 	}
 	if !reflect.DeepEqual(after.NodePool.InstanceTypes, []string{"t3.medium"}) || after.NodePool.CapacityType != "ON_DEMAND" || after.NodePool.AMIType != "AL2023_x86_64_STANDARD" {
 		t.Errorf("the stored node group settings changed: %+v", after.NodePool)

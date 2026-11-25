@@ -6,11 +6,11 @@ spec:
   # The cloud it is installed on; the same component for another cloud is
   # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
-  description: Karpenter node autoscaler. It launches EC2 nodes for the cluster's own (user) node groups only; the platform applies their NodePools and EC2NodeClasses itself, this definition ships no chart for them. The platform's own pods run on the system managed node group (docs/architecture.md#components-and-the-catalog).
+  description: Karpenter node autoscaler. It launches EC2 nodes for the platform pool and the cluster's own (user) node groups; the platform applies their NodePools and EC2NodeClasses itself, this definition ships no chart for them. It runs on the system managed node group; the platform's other components run on its platform pool (docs/architecture.md#node-layout).
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform
-  # The first platform component: every other one installs after it, by
-  # sequence.
+  # The first platform component (phase 1): every other one installs after
+  # it, by sequence; those on the platform pool also wait for that pool.
   sequence: 0
   namespace: kube-system
   install:
@@ -325,10 +325,10 @@ spec:
         limits:
           cpu: "1"
           memory: 1Gi
-    # The controller runs on the default managed node group (with the
-    # affinity below, which keeps it off the nodes Karpenter launches): its
-    # label, and a toleration of its taint. Every other component runs on
-    # the same group (${platform.*} is an alias of ${system.*}).
+    # Phase 1: the controller runs on the default managed node group (with
+    # the affinity below, which keeps it off the nodes Karpenter launches):
+    # its label, and a toleration of its taint. Every other component with a
+    # workload runs on the platform pool it launches (${platform.*}), after it.
     nodeSelector: ${system.nodeSelector}
     tolerations: ${system.tolerations}
     # Chart default already keeps Karpenter off Karpenter-launched nodes (karpenter.sh/nodepool DoesNotExist).

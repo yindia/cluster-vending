@@ -115,11 +115,12 @@ export type ScalingConfig = Message<"cloud.v1.ScalingConfig"> & {
   maxSize: number;
 
   /**
-   * Initial size, used at creation only. Defaults to max(min_size, 1). After
-   * creation the cluster autoscaler owns the node count: the server sets it
-   * through Crossplane `spec.initProvider` (AWS
-   * initProvider.scalingConfig.desiredSize), so it is never reconciled back
-   * and UpdateCluster ignores it. Only min_size / max_size are mutable.
+   * Initial size. Defaults to max(min_size, 1). The default node group of a
+   * cluster the platform created has one static size, the platform admin's:
+   * min, max and desired are equal and applied in place (nothing autoscales
+   * it). An imported cluster's group gets it at creation only, through
+   * Crossplane `spec.initProvider` (AWS initProvider.scalingConfig.desiredSize),
+   * so it is never reconciled back. UpdateCluster ignores it.
    *
    * @generated from field: optional uint32 desired_size = 3;
    */

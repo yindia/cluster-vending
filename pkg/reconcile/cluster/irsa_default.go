@@ -13,8 +13,8 @@ import (
 )
 
 // withIRSA defaults a new cluster's spec.aws.irsa: the platform components
-// installed with every cluster (the load balancer controller, the
-// autoscaler, Karpenter, ...) reach AWS through IRSA roles, which need the
+// installed with every cluster (the load balancer controller, external
+// secrets, Karpenter, ...) reach AWS through IRSA roles, which need the
 // cluster's IAM OIDC provider. Only creates: an imported or taken-over
 // cluster keeps the OIDC setup it came with.
 func (s *Reconciler) withIRSA(ctx context.Context, spec *cloudv1.ClusterSpec) error {

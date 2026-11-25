@@ -126,11 +126,11 @@ type ClusterPlan struct {
 	// (karpenter.go). The platform's own clusters have it; an imported one
 	// does not unless the caller says so.
 	Karpenter bool
-	// SystemPoolMin and SystemPoolMax are the platform admin's minimum and
-	// maximum size of the default node group (SystemPoolBounds: 0 is the
-	// default). The desired size is the minimum at creation only, then
-	// cluster-autoscaler's. Not used for an imported cluster's own group.
-	SystemPoolMin, SystemPoolMax int
+	// SystemPoolSize is the platform admin's static size of the default
+	// node group (SystemPoolSize: 0 is the default): its min, max and
+	// desired size, applied in place. Not used for an imported cluster's
+	// own group.
+	SystemPoolSize int
 	// AccountID is the AWS account of the cluster: with it the interruption
 	// queue's ARN is known up front. Without it (and without
 	// KarpenterQueueARN) the queue policy and the rules' targets wait for
@@ -338,17 +338,6 @@ func (b clusterBuilder) tags(name string) map[string]*string {
 	return out
 }
 
-// ClusterAutoscalerTags are the tags that make a managed node group's Auto
-// Scaling group one cluster-autoscaler manages on the named cluster
-// (autoDiscovery.tags; the IAM policy's condition on the cluster name's tag
-// is "owned").
-func ClusterAutoscalerTags(clusterName string) map[string]*string {
-	return map[string]*string{
-		"k8s.io/cluster-autoscaler/enabled":        ptr.To("true"),
-		"k8s.io/cluster-autoscaler/" + clusterName: ptr.To("owned"),
-	}
-}
-
 func (b clusterBuilder) ref(name string) *xpv2.NamespacedReference {
 	return &xpv2.NamespacedReference{Name: name}
 }
@@ -414,8 +403,9 @@ func (b clusterBuilder) cluster() *awseks.Cluster {
 	return &awseks.Cluster{ObjectMeta: meta, Spec: awseks.ClusterSpec{ManagedResourceSpec: b.spec(), ForProvider: params}}
 }
 
-// nodeGroup is the default node group. The desired size is set once, at
-// creation (initProvider): the cluster autoscaler owns it afterwards.
+// nodeGroup is the default node group. Its desired size is applied as
+// rendered for the platform's static system group, at creation only
+// otherwise (NodeGroupAdjust).
 // KubeconfigSecretKey is the key of the kubeconfig in the ClusterAuth
 // connection Secret.
 const KubeconfigSecretKey = "kubeconfig"
@@ -499,13 +489,6 @@ func (b clusterBuilder) nodeGroup() *awseks.NodeGroup {
 			MaxSize: ptr.To(float64(n.MaxSize)), DesiredSize: ptr.To(float64(n.Desired))},
 		Labels: strPtrs(n.Labels),
 		Tags:   b.tags(name),
-	}
-	if n.Labels[PoolLabelKey] == PoolSystem {
-		// EKS copies a managed node group's tags to its Auto Scaling group,
-		// which is how cluster-autoscaler finds this group (its
-		// autoDiscovery tags) and no other: Karpenter's nodes are in no
-		// Auto Scaling group.
-		maps.Copy(params.Tags, ClusterAutoscalerTags(b.p.ClusterName))
 	}
 	// A custom AMI brings its own Kubernetes version: EKS refuses one here.
 	if v := b.nodeVersion(); v != "" && n.AMIType != amiTypeCustom {
@@ -608,12 +591,30 @@ func ClusterLists() []client.ObjectList {
 	}, append(karpenterLists(), resultsLists()...)...)
 }
 
+// StaticNodeGroup reports whether the plan's node group is the platform's
+// static system group (FixedSystemNodePool on a cluster the platform
+// created): its desired size is applied as rendered, in place. An imported
+// cluster's own group keeps the count whatever scales it there sets.
+func (p ClusterPlan) StaticNodeGroup() bool {
+	return !p.Imported() && p.NodePool.Labels[PoolLabelKey] == PoolSystem
+}
+
+// NodeGroupAdjust is how the plan's node group is applied: nil (as
+// rendered, desired size in forProvider) for the static system group,
+// DesiredSizeAtCreateOnly otherwise.
+func NodeGroupAdjust(p ClusterPlan) func(*unstructured.Unstructured) {
+	if p.StaticNodeGroup() {
+		return nil
+	}
+	return DesiredSizeAtCreateOnly
+}
+
 // DesiredSizeAtCreateOnly moves a NodeGroup's desired size (an apply body,
 // see kube.ApplyObject) from forProvider to initProvider: the provider's
 // Go type always serializes forProvider.scalingConfig.desiredSize (no
 // omitempty), so applying it as is makes Crossplane reset the node count
-// to it on every poll, against any autoscaler. In initProvider it is set
-// at creation only.
+// to it on every poll, against whatever scales the group. In initProvider
+// it is set at creation only.
 func DesiredSizeAtCreateOnly(u *unstructured.Unstructured) {
 	desired, found, _ := unstructured.NestedFieldNoCopy(u.Object, "spec", "forProvider", "scalingConfig", "desiredSize")
 	unstructured.RemoveNestedField(u.Object, "spec", "forProvider", "scalingConfig", "desiredSize")

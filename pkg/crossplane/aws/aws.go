@@ -55,7 +55,16 @@ const ProviderVersion = "v2.9.0"
 //	7  the bucket of the cluster's scan results with its public access
 //	   block, ownership controls, encryption, TLS-only policy and lifecycle
 //	   (results_bucket.go), for clusters the platform created
-const RenderVersion = 8
+//	9  metrics-server, kube-state-metrics, snapshot-controller, cert-manager
+//	   (with its cainjector and webhook) and the controllers of the EFS, FSx
+//	   and Mountpoint S3 CSI drivers follow the system node group like
+//	   coredns (addon_placement.go). Add-ons are Build items, which the
+//	   code-change fingerprint counts by name only: a change to their
+//	   render needs this bump (addons_render_version_test.go)
+//	10 the system node group has a static size (min = max = desired,
+//	   desired applied in place) and no cluster-autoscaler tags: Karpenter
+//	   is the only scaler
+const RenderVersion = 10
 
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.

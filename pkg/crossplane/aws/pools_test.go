@@ -15,7 +15,7 @@ import (
 func TestSystemPoolIsFixedByThePlatform(t *testing.T) {
 	old := clusterPlan().NodePool // a tenant-chosen pool: other taints, scaling 1..3
 
-	got := crossplaneaws.FixedSystemNodePool(old, 3, 8)
+	got := crossplaneaws.FixedSystemNodePool(old, 3)
 
 	if !reflect.DeepEqual(got.Labels, map[string]string{"node.cluster-vending.io/pool": "system"}) {
 		t.Errorf("labels = %v", got.Labels)
@@ -23,17 +23,17 @@ func TestSystemPoolIsFixedByThePlatform(t *testing.T) {
 	if want := []crossplaneaws.TaintPlan{{Key: "node.cluster-vending.io/pool", Value: "system", Effect: "NO_SCHEDULE"}}; !reflect.DeepEqual(got.Taints, want) {
 		t.Errorf("taints = %v, want %v", got.Taints, want)
 	}
-	// Desired is the size at creation (the minimum); afterwards it is the
-	// autoscaler's (DesiredSizeAtCreateOnly).
-	if got.MinSize != 3 || got.MaxSize != 8 || got.Desired != 3 {
-		t.Errorf("size = %d/%d/%d, want min 3, max 8, desired 3", got.MinSize, got.MaxSize, got.Desired)
+	// A static size: nothing scales the group, so min, max and desired
+	// are the one size.
+	if got.MinSize != 3 || got.MaxSize != 3 || got.Desired != 3 {
+		t.Errorf("size = %d/%d/%d, want 3/3/3", got.MinSize, got.MaxSize, got.Desired)
 	}
-	for _, c := range []struct{ min, max, wantMin, wantMax int }{
-		{0, 0, 2, 6}, {1, 0, 2, 6}, {-3, 4, 2, 4}, // unset or below the minimum: the defaults
-		{2, 0, 2, 6}, {2, 1, 2, 2}, {9, 0, 9, 9}, // a maximum below the minimum is the minimum
+	for _, c := range []struct{ size, want int }{
+		{0, 2}, {1, 2}, {-3, 2}, // unset or below the least: the default
+		{2, 2}, {9, 9},
 	} {
-		if p := crossplaneaws.FixedSystemNodePool(old, c.min, c.max); p.MinSize != c.wantMin || p.MaxSize != c.wantMax || p.Desired != c.wantMin {
-			t.Errorf("%d..%d gave %d/%d/%d, want min %d max %d", c.min, c.max, p.MinSize, p.MaxSize, p.Desired, c.wantMin, c.wantMax)
+		if p := crossplaneaws.FixedSystemNodePool(old, c.size); p.MinSize != c.want || p.MaxSize != c.want || p.Desired != c.want {
+			t.Errorf("size %d gave %d/%d/%d, want %d", c.size, p.MinSize, p.MaxSize, p.Desired, c.want)
 		}
 	}
 	if len(old.Taints) != 1 || old.Taints[0].Key != "gpu" || old.MaxSize != 3 {
@@ -41,80 +41,89 @@ func TestSystemPoolIsFixedByThePlatform(t *testing.T) {
 	}
 }
 
-// Moving an existing cluster to the autoscaled pool, or changing its min or
-// max later, is in place: nothing EKS cannot change on a node group changes,
-// so the node group keeps its name and its object; the apply never sends
-// the desired size (the autoscaler's) except at creation.
+// Moving an existing cluster to the static size, or changing the size
+// later, is in place: nothing EKS cannot change on a node group changes, so
+// the node group keeps its name and its object. The apply sends the size as
+// desired, min and max in forProvider: an existing group that grew (under
+// the former autoscaler) goes back to it, and Crossplane holds it there.
 func TestFixingTheSystemPoolDoesNotReplaceTheNodeGroup(t *testing.T) {
 	before := clusterPlan()
-	before.NodePool = crossplaneaws.FixedSystemNodePool(before.NodePool, 2, 2) // the former fixed size
+	before.NodePool = crossplaneaws.FixedSystemNodePool(before.NodePool, 2)
 	after := before
-	after.NodePool = crossplaneaws.FixedSystemNodePool(before.NodePool, 3, 8)
+	after.NodePool = crossplaneaws.FixedSystemNodePool(before.NodePool, 3)
 
 	if a, b := crossplaneaws.ReplacementNodeGroupName(before.Prefix, before.NodePool), crossplaneaws.ReplacementNodeGroupName(after.Prefix, after.NodePool); a != b {
 		t.Errorf("replacement name changed: %s -> %s", a, b)
 	}
-	var old *awseks.NodeGroup
-	var now *awseks.NodeGroup
-	for _, o := range crossplaneaws.ClusterResources(before) {
-		if ng, ok := o.(*awseks.NodeGroup); ok {
-			old = ng
-		}
-	}
-	for _, o := range crossplaneaws.ClusterResources(after) {
-		if ng, ok := o.(*awseks.NodeGroup); ok {
-			now = ng
-		}
-	}
+	old, now := nodeGroupOf(t, before), nodeGroupOf(t, after)
 	if old.Name != now.Name || !crossplaneaws.SameNodeGroup(old, after.NodePool) {
 		t.Errorf("node group %s -> %s, same settings = %v", old.Name, now.Name, crossplaneaws.SameNodeGroup(old, after.NodePool))
 	}
 	fp := now.Spec.ForProvider
-	if *fp.ScalingConfig.MinSize != 3 || *fp.ScalingConfig.MaxSize != 8 ||
+	if *fp.ScalingConfig.MinSize != 3 || *fp.ScalingConfig.MaxSize != 3 || *fp.ScalingConfig.DesiredSize != 3 ||
 		*fp.Labels["node.cluster-vending.io/pool"] != "system" || len(fp.Taint) != 1 || *fp.Taint[0].Value != "system" || *fp.Taint[0].Effect != "NO_SCHEDULE" {
 		t.Errorf("node group = %+v", fp)
 	}
-	// The apply body: min and max in forProvider, desired only in initProvider.
-	for _, item := range crossplaneaws.ClusterSet(after) {
+	scaling, init := applyBodyScaling(t, after)
+	if scaling["desiredSize"] != 3.0 || scaling["minSize"] != 3.0 || scaling["maxSize"] != 3.0 {
+		t.Errorf("forProvider.scalingConfig = %v, want 3/3/3", scaling)
+	}
+	if init != nil {
+		t.Errorf("initProvider.scalingConfig = %v, want none: the size is applied in place", init)
+	}
+}
+
+// An imported cluster's own node group keeps its count: whatever scales it
+// there does, so its desired size is sent at creation only.
+func TestImportedNodeGroupDesiredSizeAtCreateOnly(t *testing.T) {
+	p := clusterPlan()
+	p.Adoption = crossplaneaws.Adoption{NodeRoleName: "their-node-role"}
+	if !p.Imported() {
+		t.Fatal("plan is not imported")
+	}
+	scaling, init := applyBodyScaling(t, p)
+	if _, has := scaling["desiredSize"]; has {
+		t.Errorf("forProvider.scalingConfig = %v, want no desiredSize", scaling)
+	}
+	if init["desiredSize"] == nil {
+		t.Errorf("initProvider.scalingConfig = %v, want the desired size", init)
+	}
+}
+
+// applyBodyScaling is the node group's forProvider and initProvider
+// scalingConfig as ClusterSet applies them.
+func applyBodyScaling(t *testing.T, p crossplaneaws.ClusterPlan) (forProvider, initProvider map[string]any) {
+	t.Helper()
+	for _, item := range crossplaneaws.ClusterSet(p) {
 		if _, ok := item.Object.(*awseks.NodeGroup); !ok {
 			continue
 		}
-		u := &unstructured.Unstructured{}
 		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(item.Object)
 		if err != nil {
 			t.Fatal(err)
 		}
-		u.Object = raw
-		item.Adjust(u)
-		scaling, _, _ := unstructured.NestedMap(u.Object, "spec", "forProvider", "scalingConfig")
-		if _, has := scaling["desiredSize"]; has || scaling["minSize"] != 3.0 || scaling["maxSize"] != 8.0 {
-			t.Errorf("forProvider.scalingConfig = %v, want min 3 and max 8 without desiredSize", scaling)
+		u := &unstructured.Unstructured{Object: raw}
+		if item.Adjust != nil {
+			item.Adjust(u)
 		}
-		if d, _, _ := unstructured.NestedFloat64(u.Object, "spec", "initProvider", "scalingConfig", "desiredSize"); d != 3 {
-			t.Errorf("initProvider desiredSize = %v, want the minimum, 3", d)
-		}
+		forProvider, _, _ = unstructured.NestedMap(u.Object, "spec", "forProvider", "scalingConfig")
+		initProvider, _, _ = unstructured.NestedMap(u.Object, "spec", "initProvider", "scalingConfig")
+		return forProvider, initProvider
 	}
+	t.Fatal("no node group in the set")
+	return nil, nil
 }
 
-// cluster-autoscaler finds the system group by the tags EKS copies to its
-// Auto Scaling group; a user's (imported) group is not tagged.
-func TestSystemNodeGroupIsTaggedForClusterAutoscaler(t *testing.T) {
+// Nothing autoscales the system group: no node group carries the
+// cluster-autoscaler discovery tags.
+func TestNoNodeGroupIsTaggedForClusterAutoscaler(t *testing.T) {
 	p := clusterPlan()
-	p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, 2, 6)
-	tags := nodeGroupOf(t, p).Spec.ForProvider.Tags
-	for key, want := range map[string]string{
-		"k8s.io/cluster-autoscaler/enabled":          "true",
-		"k8s.io/cluster-autoscaler/" + p.ClusterName: "owned",
-	} {
-		if tags[key] == nil || *tags[key] != want {
-			t.Errorf("tag %s = %v, want %s", key, tags[key], want)
-		}
-	}
-	// The pool a plan has when it is not the system group has neither.
-	other := clusterPlan()
-	for key := range nodeGroupOf(t, other).Spec.ForProvider.Tags {
-		if strings.HasPrefix(key, "k8s.io/cluster-autoscaler/") {
-			t.Errorf("a non-system node group carries %s", key)
+	p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, 2)
+	for _, plan := range []crossplaneaws.ClusterPlan{p, clusterPlan()} {
+		for key := range nodeGroupOf(t, plan).Spec.ForProvider.Tags {
+			if strings.HasPrefix(key, "k8s.io/cluster-autoscaler/") {
+				t.Errorf("node group carries %s", key)
+			}
 		}
 	}
 }

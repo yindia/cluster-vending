@@ -45,6 +45,7 @@ func Check(set Set, opts Options) []Problem {
 	problems = append(problems, defProblems...)
 	problems = append(problems, checkDefinitions(defs)...)
 	problems = append(problems, checkSequences(defs)...)
+	problems = append(problems, checkPhases(defs)...)
 	problems = append(problems, checkReleases(set, defs, opts)...)
 	problems = append(problems, checkChannels(set)...)
 	if opts.SystemGroup != nil {

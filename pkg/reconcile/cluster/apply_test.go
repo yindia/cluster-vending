@@ -25,8 +25,9 @@ func (noInventory) List(context.Context) ([]sequence.Entry, error) { return nil,
 func (noInventory) Add(context.Context, []client.Object) error     { return nil }
 func (noInventory) Remove(context.Context, sequence.Entry) error   { return nil }
 
-// The node count is the autoscaler's after creation: the apply body sets
-// desiredSize in initProvider, never in forProvider.
+// An imported node group's count is whatever scales it there after
+// creation: the apply body sets desiredSize in initProvider, never in
+// forProvider.
 func TestApplyNodeGroupSendsDesiredSizeAtCreateOnly(t *testing.T) {
 	scheme, err := kube.Scheme()
 	if err != nil {
@@ -46,7 +47,7 @@ func TestApplyNodeGroupSendsDesiredSizeAtCreateOnly(t *testing.T) {
 	ng.Spec.ForProvider.Region = ptr.To("us-east-1")
 	ng.Spec.ForProvider.ScalingConfig = &awseks.ScalingConfigParameters{
 		MinSize: ptr.To(1.0), MaxSize: ptr.To(3.0), DesiredSize: ptr.To(2.0)}
-	// An imported node group, like a rendered one (crossplaneaws.ClusterSet).
+	// An imported node group (crossplaneaws.NodeGroupAdjust).
 	res, err := reconcile.Deps{Kube: k}.Sequence().Apply(context.Background(), importSet([]client.Object{ng}), noInventory{})
 	if err != nil || res.Applied != 1 {
 		t.Fatalf("apply = %+v (%v)", res, err)

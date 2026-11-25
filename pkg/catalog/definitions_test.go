@@ -39,7 +39,7 @@ func TestCatalogHasTheOfferedComponents(t *testing.T) {
 	for _, d := range definitions(t) {
 		names = append(names, d.Name)
 	}
-	want := []string{"aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "gpu-operator", "istio", "istio-base",
+	want := []string{"aws-load-balancer-controller", "capsule", "external-secrets", "gpu-operator", "istio", "istio-base",
 		"istio-cni",
 		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "kyverno-policies", "ztunnel"}
 	if !slices.Equal(names, want) {
@@ -150,7 +150,7 @@ func TestWhoControlsWhat(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := definitionNames(platform)
-	want := []string{"karpenter", "aws-load-balancer-controller", "capsule", "cluster-autoscaler", "external-secrets", "istio-base", "istiod",
+	want := []string{"karpenter", "aws-load-balancer-controller", "capsule", "external-secrets", "istio-base", "istiod",
 		"istio-cni", "istio-ingress-gateway", "kyverno", "ztunnel"}
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)
@@ -202,22 +202,22 @@ func TestIstioBundle(t *testing.T) {
 	}
 }
 
-// Everything the platform and tenants run is on the system managed node
-// group (the cluster's only platform node group, tainted: platform.* is the
-// alias of system.*), so each Platform and Tenant definition places its
-// Deployments and StatefulSets there with the nodeSelector and tolerations
-// placeholders at its chart's keys, and its DaemonSets run on every node.
+// Where every definition's pods run (docs/architecture.md#node-layout,
+// "Install order"): phase 1 on the fixed system managed node group
+// (${system.*}): Karpenter; phase 2 on Karpenter's platform pool (${platform.*}): every other
+// Platform and Tenant definition with Deployments or StatefulSets. Each
+// sets the nodeSelector and tolerations placeholders at its chart's keys;
+// DaemonSets run on every node.
 //
 // The keys are checked against `helm template` of the pinned chart (see
 // pkg/catalog/release.yaml) with these values: every Deployment, StatefulSet,
-// Job and CronJob of the chart then carries the system selector and
-// toleration, except the DaemonSets listed below. A new definition must be
-// listed in placedWorkloads or noWorkloads.
+// Job and CronJob of the chart then carries the selector and toleration,
+// except the DaemonSets listed below. A new definition must be listed in
+// placedWorkloads or noWorkloads.
 var placedWorkloads = map[string][][]any{
 	// Paths of the values at which a nodeSelector and tolerations are set.
 	"aws-load-balancer-controller": {{}},
 	"capsule":                      {{}, {"global", "jobs", "kubectl"}}, // the Deployment, and the CRD and delete hook Jobs
-	"cluster-autoscaler":           {{}},
 	"istiod":                       {{}},
 	"istio-ingress-gateway":        {{}},
 	"kyverno":                      {{"global"}},
@@ -241,27 +241,42 @@ var placedDaemonSets = map[string]bool{"istio-cni": true, "ztunnel": true}
 // template).
 var noWorkloads = map[string]bool{"istio": true, "istio-base": true, "kyverno-policies": true}
 
-func TestEveryWorkloadRunsOnTheSystemNodeGroup(t *testing.T) {
+// onSystemGroup are the phase-1 definitions: Karpenter alone, beside the
+// EKS add-ons (no definitions). Everything else with a workload runs on the
+// platform pool.
+var onSystemGroup = map[string]bool{"karpenter": true}
+
+func TestEveryWorkloadRunsOnItsPhasesPool(t *testing.T) {
 	seen := map[string]bool{}
 	for _, d := range catalogDefinitions(t) {
 		used := component.Placeholders(d.PlatformValues)
+		if phase, _ := component.InstallPhaseOf(d); phase == component.PhaseSystemGroup && !onSystemGroup[d.Name] {
+			t.Errorf("%s uses ${system.*}: only Karpenter (and the EKS add-ons) run on the system group", d.Name)
+		}
 		switch {
 		case placedWorkloads[d.Name] != nil:
 			seen[d.Name] = true
 			for _, path := range placedWorkloads[d.Name] {
 				at := lookup(d.PlatformValues, path...)
 				selector, tolerations := lookup(at, "nodeSelector"), lookup(at, "tolerations")
-				if !isSystemGroup(selector, "nodeSelector") || !isSystemGroup(tolerations, "tolerations") {
-					t.Errorf("%s: nodeSelector %v, tolerations %v at %v: want the system node group (${system.*} or ${platform.*})", d.Name, selector, tolerations, path)
+				pool := "platform"
+				if onSystemGroup[d.Name] {
+					pool = "system"
+				}
+				if selector != "${"+pool+".nodeSelector}" || tolerations != "${"+pool+".tolerations}" {
+					t.Errorf("%s: nodeSelector %v, tolerations %v at %v: want ${%s.*}", d.Name, selector, tolerations, path, pool)
 				}
 			}
 		case placedDaemonSets[d.Name]:
 			seen[d.Name] = true
 			if slices.Contains(used, "system.nodeSelector") || slices.Contains(used, "platform.nodeSelector") {
-				t.Errorf("%s is a DaemonSet that must run on every node, but selects the system group", d.Name)
+				t.Errorf("%s is a DaemonSet that must run on every node, but selects a pool", d.Name)
 			}
 		case noWorkloads[d.Name]:
 			seen[d.Name] = true
+			if phase, _ := component.InstallPhaseOf(d); phase != component.PhaseUnplaced {
+				t.Errorf("%s runs no pod but is placed on the %v", d.Name, phase)
+			}
 		default:
 			t.Errorf("%s (%s) is in no placement list: add where its Deployments take a nodeSelector and tolerations to placedWorkloads, or to placedDaemonSets / noWorkloads", d.Name, d.Management)
 		}
@@ -280,10 +295,57 @@ func TestEveryWorkloadRunsOnTheSystemNodeGroup(t *testing.T) {
 	}
 }
 
-// isSystemGroup: v is the whole-value placeholder of the system group (system.* and
-// platform.* are the same group).
-func isSystemGroup(v any, key string) bool {
-	return v == "${system."+key+"}" || v == "${platform."+key+"}"
+// The install order of the catalog: phase 1 (Karpenter, sequence 0, then
+// what else runs on the system group) needs nothing of phase 2, and every
+// other component with a workload either is on the platform pool (so it
+// waits for the pool to be Ready) or requires one that is (istio-cni after
+// istiod, ztunnel after istio-cni): nothing in phase 2 starts before the pool.
+func TestPhaseTwoWaitsForThePlatformPool(t *testing.T) {
+	defs := map[string]component.Definition{}
+	for _, d := range catalogDefinitions(t) {
+		defs[d.Name] = d
+	}
+	phase := func(name string) component.InstallPhase {
+		p, err := component.InstallPhaseOf(defs[name])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	var behindPool func(name string, seen map[string]bool) bool
+	behindPool = func(name string, seen map[string]bool) bool {
+		if phase(name) == component.PhasePlatformPool {
+			return true
+		}
+		for _, r := range defs[name].Requires {
+			if !seen[r] {
+				seen[r] = true
+				if behindPool(r, seen) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for name, d := range defs {
+		switch {
+		case onSystemGroup[name]:
+			if phase(name) != component.PhaseSystemGroup {
+				t.Errorf("%s is phase 1 but is on the %v", name, phase(name))
+			}
+			for _, r := range d.Requires {
+				if phase(r) == component.PhasePlatformPool {
+					t.Errorf("%s (phase 1) requires %s, which is on the platform pool", name, r)
+				}
+			}
+		case noWorkloads[name]:
+		case !behindPool(name, map[string]bool{}):
+			t.Errorf("%s runs pods but neither is on the platform pool nor requires a component that is: it would start before the pool", name)
+		}
+	}
+	if karpenter := defs["karpenter"]; karpenter.Sequence != 0 {
+		t.Errorf("karpenter sequence = %d, want 0: it installs first", karpenter.Sequence)
+	}
 }
 
 // Karpenter must run on the system group (where it launches the others'
@@ -304,46 +366,18 @@ func TestKarpenterRunsOnTheSystemGroupAndOffItsOwnNodes(t *testing.T) {
 	}
 }
 
-// cluster-autoscaler resizes the system managed node group only: it
-// discovers Auto Scaling groups by the two tags the platform puts on that
-// node group (and no other), it sets no --nodes, its IAM write access is
-// scoped to groups tagged for this cluster, and Karpenter's nodes (in no
-// Auto Scaling group) are not its.
-func TestClusterAutoscalerScalesOnlyTheSystemGroup(t *testing.T) {
-	def, err := component.DefinitionOf(byName(t)["cluster-autoscaler"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if def.Management != component.Platform {
-		t.Errorf("management = %v, want Platform", def.Management)
-	}
-	v := def.PlatformValues
-	if lookup(v, "cloudProvider") != "aws" {
-		t.Errorf("cloudProvider = %v", lookup(v, "cloudProvider"))
-	}
-	tags := stringList(t, lookup(v, "autoDiscovery", "tags"))
-	if want := []string{"k8s.io/cluster-autoscaler/enabled", "k8s.io/cluster-autoscaler/${cluster.name}"}; !slices.Equal(tags, want) {
-		t.Errorf("autoDiscovery.tags = %v, want %v", tags, want)
-	}
-	if extra, _ := lookup(v, "extraArgs").(map[string]any); extra != nil {
-		if _, has := extra["nodes"]; has {
-			t.Error("extraArgs sets nodes: only autoDiscovery picks the node group")
+// Nothing autoscales the system managed node group: it has one static
+// size, and Karpenter is the only scaler. No shipped definition installs
+// cluster-autoscaler, by name or chart.
+func TestNoClusterAutoscalerInTheCatalog(t *testing.T) {
+	for _, d := range definitions(t) {
+		chart := ""
+		if d.Spec.Install != nil && d.Spec.Install.Helm != nil {
+			chart = d.Spec.Install.Helm.Chart
 		}
-	}
-	if _, has := v["autoscalingGroups"]; has {
-		t.Error("autoscalingGroups names groups by hand: only autoDiscovery picks the node group")
-	}
-	if lookup(v, "image") != nil {
-		t.Error("the definition sets image: the release pins the tag per Kubernetes minor")
-	}
-	policy := byName(t)["cluster-autoscaler"].Spec.CloudResources.IAMRole.Policy
-	if !strings.Contains(policy, "aws:ResourceTag/k8s.io/cluster-autoscaler/${cluster.name}") ||
-		strings.Contains(policy, `"autoscaling:*"`) {
-		t.Errorf("the IAM policy does not scope writes to this cluster's tagged groups:\n%s", policy)
-	}
-	reqs, _ := lookup(v, "resources", "requests").(map[string]any)
-	if reqs["cpu"] != "50m" || reqs["memory"] != "128Mi" {
-		t.Errorf("requests = %v, want 50m / 128Mi (the system group's budget)", reqs)
+		if strings.Contains(d.Name, "cluster-autoscaler") || chart == "cluster-autoscaler" {
+			t.Errorf("definition %s installs cluster-autoscaler (chart %q)", d.Name, chart)
+		}
 	}
 }
 

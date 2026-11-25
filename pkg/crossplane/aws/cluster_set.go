@@ -42,8 +42,9 @@ func afterActive(obj client.Object) bool {
 //   - a Usage whose "by" object waits is held back with it: a Usage whose
 //     user never exists is never garbage-collected and would block its
 //     object's deletion for good;
-//   - the node group is applied with its desired size at creation only
-//     (DesiredSizeAtCreateOnly);
+//   - the node group is applied as NodeGroupAdjust says: the static
+//     system group with its desired size, any other with it at creation
+//     only (DesiredSizeAtCreateOnly);
 //   - a plan with objects that need a value of another resource (the
 //     encryption key's ARN, the cluster's issuer or security group, a log
 //     group that must exist first: FillLive) lists every object it will
@@ -69,7 +70,7 @@ func ClusterSet(p ClusterPlan) sequence.Set {
 		}
 		switch obj := item.Object.(type) {
 		case *awseks.NodeGroup:
-			set[i].Adjust = DesiredSizeAtCreateOnly
+			set[i].Adjust = NodeGroupAdjust(p)
 			set[i].After = active
 		case *protectionv1beta1.Usage:
 			// After its "by" object, below.

@@ -27,6 +27,8 @@ func importedClusterWithPool(labels map[string]string, taints []cloudv1alpha1.Ta
 var (
 	systemSelector = map[string]any{"node.cluster-vending.io/pool": "system"}
 	systemTaints   = []any{map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "system", "effect": "NoSchedule"}}
+	poolSelector   = map[string]any{"node.cluster-vending.io/pool": "platform-pool"}
+	poolTaints     = []any{map[string]any{"key": "node.cluster-vending.io/pool", "operator": "Equal", "value": "platform-pool", "effect": "NoSchedule"}}
 )
 
 func TestExpandSystemPlacement(t *testing.T) {
@@ -80,9 +82,9 @@ func TestExpandSystemPlacement(t *testing.T) {
 	}
 }
 
-// ${platform.*} is an alias of ${system.*}: the platform has one node group,
-// the default managed one. An imported cluster's components follow its
-// default pool, as before.
+// ${platform.*} is Karpenter's platform pool (platform-pool) on a platform
+// cluster: every component but the phase-1 one (Karpenter) runs there. An imported cluster's components follow
+// its default pool, as before.
 func TestExpandPlatformPlacement(t *testing.T) {
 	doc := map[string]any{"nodeSelector": "${platform.nodeSelector}", "tolerations": "${platform.tolerations}"}
 	tests := []struct {
@@ -91,7 +93,7 @@ func TestExpandPlatformPlacement(t *testing.T) {
 		wantSelector map[string]any
 		wantTol      []any
 	}{
-		{name: "a platform cluster: the system group", cluster: testCluster(true), wantSelector: systemSelector, wantTol: systemTaints},
+		{name: "a platform cluster: the platform pool", cluster: testCluster(true), wantSelector: poolSelector, wantTol: poolTaints},
 		{name: "imported: its default pool", cluster: importedClusterWithPool(map[string]string{"role": "system"}, nil),
 			wantSelector: map[string]any{"role": "system"}, wantTol: []any{}},
 	}

@@ -1134,11 +1134,6 @@ spec:
                   request.userInfo.username.startsWith("system:serviceaccount:" + ns + ":"))
               name: exclude-trusted-system-serviceaccounts
         version: 0.15.2
-      - name: cluster-autoscaler
-        values:
-          image:
-            tag: v1.37.0
-        version: 9.60.0
       - name: external-secrets
         version: 2.15.0
       - name: gpu-operator
@@ -2283,11 +2278,6 @@ spec:
                   request.userInfo.username.startsWith("system:serviceaccount:" + ns + ":"))
               name: exclude-trusted-system-serviceaccounts
         version: 0.15.2
-      - name: cluster-autoscaler
-        values:
-          image:
-            tag: v1.36.2
-        version: 9.60.0
       - name: external-secrets
         version: 2.15.0
       - name: gpu-operator
@@ -3432,11 +3422,6 @@ spec:
                   request.userInfo.username.startsWith("system:serviceaccount:" + ns + ":"))
               name: exclude-trusted-system-serviceaccounts
         version: 0.15.2
-      - name: cluster-autoscaler
-        values:
-          image:
-            tag: v1.35.3
-        version: 9.60.0
       - name: external-secrets
         version: 2.15.0
       - name: gpu-operator
@@ -3461,4 +3446,4 @@ spec:
       minor: "1.35"
       nodeAmiPin: v20261107
       upgradeTo: "1.36"
-    renderVersion: 8
+    renderVersion: 10

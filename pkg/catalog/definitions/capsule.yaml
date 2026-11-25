@@ -30,6 +30,11 @@ spec:
     proxy:
       enabled: false
     replicaCount: 2
+    # Phase 2: Karpenter's platform pool (docs/architecture.md#node-layout,
+    # "Install order"): its labels, and a toleration of its taint. They have
+    # no value until Karpenter is Ready and the pool is, so this installs after.
+    # Its namespace webhooks fail closed: while the pool has no node for
+    # them, namespace changes are refused.
     nodeSelector: ${platform.nodeSelector}
     tolerations: ${platform.tolerations}
     priorityClassName: system-cluster-critical
@@ -61,7 +66,7 @@ spec:
     global:
       jobs:
         kubectl:
-          # CRD install/upgrade and cleanup hooks must tolerate the system pool.
+          # CRD install/upgrade and cleanup hooks run on the platform pool too.
           nodeSelector: ${platform.nodeSelector}
           tolerations: ${platform.tolerations}
           priorityClassName: system-cluster-critical

@@ -163,12 +163,9 @@ channels:
 }
 
 // Karpenter installs first (sequence 0) and gates everything after it; every
-// other component, cluster-autoscaler too, is at the default 100. A
-// component of a lower sequence is waited for by the later ones, and the
-// autoscaler is not to be waited for: the system group works at its minimum
-// size without it, and one that failed or gave up must not leave every other
-// platform and tenant component pending.
-func TestKarpenterAndTheAutoscalerInstallFirst(t *testing.T) {
+// other component is at the default 100. A component of a lower sequence is
+// waited for by the later ones.
+func TestKarpenterInstallsFirst(t *testing.T) {
 	defs, err := catalog.Definitions()
 	if err != nil {
 		t.Fatal(err)

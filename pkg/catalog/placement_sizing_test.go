@@ -24,7 +24,9 @@ func withRequests(defs []component.Definition, name, cpu, memory string) []compo
 		if d.Name == name {
 			d.PlatformValues = component.Values{"replicaCount": 1, "resources": map[string]any{"requests": map[string]any{"cpu": cpu, "memory": memory}},
 				"webhook":        map[string]any{"replicaCount": 1, "resources": map[string]any{"requests": map[string]any{"cpu": "1m", "memory": "1Mi"}}},
-				"certController": map[string]any{"replicaCount": 1, "resources": map[string]any{"requests": map[string]any{"cpu": "1m", "memory": "1Mi"}}}}
+				"certController": map[string]any{"replicaCount": 1, "resources": map[string]any{"requests": map[string]any{"cpu": "1m", "memory": "1Mi"}}},
+				// Its placement on the platform pool, as the definition has it.
+				"global": d.PlatformValues["global"]}
 		}
 		out = append(out, d)
 	}
@@ -32,7 +34,7 @@ func withRequests(defs []component.Definition, name, cpu, memory string) []compo
 }
 
 func bootstrapGroup(min int, types ...string) config.SystemNodeGroup {
-	return config.SystemNodeGroup{InstanceTypes: types, MinSize: min, MaxSize: min + 4}
+	return config.SystemNodeGroup{InstanceTypes: types, MinSize: min}
 }
 
 func TestShippedCatalogFitsTheDefaultBootstrapGroup(t *testing.T) {
@@ -122,7 +124,7 @@ func TestShippedCatalogFitsTheDefaultPlatformPool(t *testing.T) {
 			t.Errorf("summary lacks %s:\n%s", name, summary)
 		}
 	}
-	for _, name := range []string{"karpenter", "cluster-autoscaler", "coredns", "istio-cni", "ztunnel"} {
+	for _, name := range []string{"karpenter", "coredns", "istio-cni", "ztunnel"} {
 		if strings.Contains(summary, name) {
 			t.Errorf("summary counts %s, which does not run on the pool:\n%s", name, summary)
 		}

@@ -16,7 +16,8 @@ const conditionPlatformReady = "PlatformComponentsReady"
 
 // scenarioClusterCreate creates the cluster and asserts what a new cluster
 // is: the install order, the platform components, the system node group,
-// the cluster-autoscaler tags, the results bucket and the node lists.
+// (static size, no cluster-autoscaler tags), the results bucket and the
+// node lists.
 func (e *env) scenarioClusterCreate(t *testing.T) {
 	need(t, e.st.networkID != "", "no network (scenario 2)")
 
@@ -112,10 +113,11 @@ func (e *env) assertPlatformComponents(t *testing.T, c *cloudv1.Cluster) {
 			t.Errorf("platform component %s is %s: %s %s", p.GetName(), p.GetPhase(), p.GetMessage(), p.GetLastError())
 		}
 	}
-	for _, want := range []string{karpenter, "cluster-autoscaler"} {
-		if !have[want] {
-			t.Errorf("platform component %s is missing (have %v)", want, have)
-		}
+	if !have[karpenter] {
+		t.Errorf("platform component %s is missing (have %v)", karpenter, have)
+	}
+	if have["cluster-autoscaler"] {
+		t.Error("platform component cluster-autoscaler is installed: Karpenter is the only scaler")
 	}
 	if st.GetPlatformRelease() == "" {
 		t.Error("status.platformRelease is empty")

@@ -21,7 +21,7 @@ cluster-vending creates AWS networks (VPCs) and EKS clusters for tenants by
 writing Crossplane managed resources (provider-upjet-aws, namespaced
 `*.aws.m.upbound.io` kinds) into a management cluster. It can also import an
 existing VPC or EKS cluster read-only and, later, take it over. On top of that
-it installs platform components (Karpenter, cluster-autoscaler, and others),
+it installs platform components (Karpenter, Kyverno, Istio and others),
 installs tenant components on request, rolls Kubernetes minors and platform
 releases out through release channels, and scans workload clusters for
 deprecated APIs, policy violations and resource recommendations.
@@ -93,15 +93,15 @@ platform's own credentials alone ([AWS access and accounts](#aws-access-and-acco
   identity provider association ([Cluster OIDC](#cluster-oidc)).
 - Import of an existing EKS cluster, then takeover, and a kubeconfig download
   (IAM, or OIDC with `kubectl oidc-login`).
-- Node groups: one platform-managed system node group, autoscaled by
-  cluster-autoscaler, and the tenant's own Karpenter node groups under an
-  allowlist ([Node layout](#node-layout)).
+- Node groups: one platform-managed system node group of a static size, and
+  the tenant's own Karpenter node groups under an allowlist (Karpenter is the
+  only scaler) ([Node layout](#node-layout)).
 - Retry of failed components and automatic upgrades (`cluster retry`).
 
 **Components**
 
 - Platform components, installed with every cluster and never enabled by a
-  tenant: Karpenter, cluster-autoscaler, AWS Load Balancer Controller,
+  tenant: Karpenter, AWS Load Balancer Controller,
   External Secrets, Kyverno, the Istio ambient bundle, and Capsule when the
   cluster sets `naas`.
 - Tenant components, enabled per cluster with validated values: `gpu-operator`
@@ -505,10 +505,8 @@ The install order of a new cluster:
 2. Karpenter (sequence 0, the platform's first component; everything after it
    waits for it).
 3. The other platform components by sequence (default 100), in `requires`
-   order: cluster-autoscaler, AWS Load Balancer Controller, External Secrets,
-   Kyverno, the Istio bundle, and Capsule when `naas` is set. Nothing waits
-   for cluster-autoscaler: a failed autoscaler does not hold the rest back,
-   because the system node group works at its minimum size without it.
+   order, on the platform pool: AWS Load Balancer Controller, External
+   Secrets, Kyverno, the Istio bundle, and Capsule when `naas` is set.
 4. The tenant components, when the tenant enables them.
 
 Each platform component's version and locked values come from the release the
@@ -524,7 +522,6 @@ The shipped platform set (`pkg/catalog/definitions`):
 | Component | Chart (pinned in `release.yaml`) | Namespace | Notes |
 |---|---|---|---|
 | `karpenter` | `karpenter` 1.15.1 (OCI, public ECR) | `kube-system` | sequence 0. Its IAM role is IRSA. Ships no NodePool or EC2NodeClass. |
-| `cluster-autoscaler` | `cluster-autoscaler` 9.60.0 | `kube-system` | default sequence (nothing waits for it). Scales the system node group only. The image tag is set per Kubernetes minor. |
 | `aws-load-balancer-controller` | 3.6.2 | `kube-system` | IRSA. |
 | `external-secrets` | 2.15.0 | `external-secrets` | |
 | `kyverno` | 3.10.0 | `kyverno` | Enabled by default. The policies are `kyverno-policies`, a tenant component. |
@@ -629,22 +626,71 @@ A cluster has three kinds of nodes:
 
 | Pool | Label | Taint | Runs |
 |---|---|---|---|
-| The system node group (`system`), EKS managed | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Karpenter, cluster-autoscaler, CoreDNS, the platform and tenant components, the EKS add-on controllers |
-| The platform pool (`platform-pool`, Karpenter) | `node.cluster-vending.io/pool=platform-pool` | `node.cluster-vending.io/pool=platform-pool:NoSchedule` | Nothing yet: built and empty ([PROP-03](proposals/PROP-03-component-placement.md) phase 2; components move to it in phases 3 and 4) |
+| The system node group (`system`), EKS managed | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Phase 1: the EKS add-on controllers (CoreDNS and the others below) and Karpenter (`${system.*}`), nothing else |
+| The platform pool (`platform-pool`, Karpenter) | `node.cluster-vending.io/pool=platform-pool` | `node.cluster-vending.io/pool=platform-pool:NoSchedule` | Phase 2: every other platform component (AWS Load Balancer Controller, External Secrets, Capsule, Kyverno, istiod, the ingress gateway) and the tenant's components (the GPU operator's controllers), through `${platform.*}` |
 | The tenant's Karpenter node groups (`spec.nodeGroups`) | `node.cluster-vending.io/pool=<name>` and the tenant's labels | The tenant's taints | The tenant's workloads |
 
 DaemonSets (VPC CNI, kube-proxy, the pod identity agent, istio-cni, ztunnel)
 tolerate every taint and run everywhere.
 
+The platform places the EKS add-on controllers on the system group through
+their `configurationValues` (`addonPlacements` in
+`pkg/crossplane/aws/addon_placement.go`): CoreDNS, metrics-server,
+kube-state-metrics, snapshot-controller, cert-manager (with its cainjector and
+webhook) and the controllers of the EBS, EFS, FSx and Mountpoint S3 CSI drivers.
+A `nodeSelector` or `tolerations` the tenant sets in an add-on's
+`configurationValues` wins. Without this, a cluster without tenant node groups
+would never run those add-ons: the only other nodes are the tainted platform pool's.
+
+**Install order.** A cluster's components install in two phases, on the pool
+they run on (`component.InstallPhase`):
+
+1. **System group.** EKS creates the add-ons with the cluster. Then Karpenter
+   installs first (`sequence: 0`), on the system group (`${system.*}`). Karpenter
+   is the only catalog definition there, and needs nothing from the platform pool.
+2. **Platform pool.** When Karpenter is `Ready`, the controller applies the
+   platform pool. A component placed with `${platform.*}` has no placement value
+   until the pool's `NodePool` and `EC2NodeClass` are `Ready`. So it waits, and its
+   status message names the pool. It never installs pods that would sit
+   `Pending`, or a webhook that has no pod behind it. Then the components install
+   by sequence and `requires`, one Helm operation at a time. Their pods make
+   Karpenter launch the pool's nodes. A component without a pool of its own
+   waits for the one it requires (istio-cni for istiod, ztunnel for istio-cni,
+   kyverno-policies for kyverno). istio-base, which runs no pod, does not wait.
+   Tenant components come after every platform component.
+
+`controller --check` refuses a definition that uses both `${system.*}` and
+`${platform.*}`, a Karpenter placed on the platform pool, any other definition
+placed on the system group, and a system-group component that requires one on
+the pool. An imported cluster keeps its own
+default pool for both placeholders. If the config has no platform pool,
+`${platform.*}` falls back to the system group.
+
+On an existing cluster, the new `${platform.*}` value changes the rendered values
+of every phase-2 component. Each one moves to the pool as a catalog change of its
+own (PROP-01 4.7), once the pool is `Ready`. The definitions themselves are
+the management cluster's `ComponentDefinition` objects, which the controller
+syncs from its build at start (`--install-catalog`): a shipped definition that
+was not edited takes the build's spec, an edited or unlabelled one is kept as
+it is (`kubectl replace -f pkg/catalog/definitions/<name>.yaml` takes the
+build's).
+
 **System group.** The default managed node group of every new cluster, sized from
-the platform's `nodeGroups.system` settings. It is autoscaled by
-cluster-autoscaler between `minSize` (default 2, the least allowed, since
-Karpenter runs two replicas) and the deprecated `maxSize` (default 6; still the
-cluster-autoscaler ceiling until that leaves the default set). The cluster autoscaler
-finds the group by the tags `k8s.io/cluster-autoscaler/enabled` and
-`k8s.io/cluster-autoscaler/<cluster>`, which the platform puts on that group
-alone. Changing `minSize` or `maxSize` applies to existing clusters in place; the
-node count stays with the autoscaler. `instanceTypes` (a list of one architecture and
+the platform's `nodeGroups.system` settings. It has one static size, `minSize`
+(default 2, the least allowed, since Karpenter runs two replicas): the node
+group's min, max and desired size are all that number, and nothing autoscales
+it. Karpenter is the only scaler, of the platform pool and the tenant's groups.
+The old `maxSize` is ignored, with a warning at start. Changing `minSize`
+applies to existing clusters in place, desired size included (Crossplane keeps
+`forProvider.scalingConfig.desiredSize`, so a group that grew is brought back to
+it). The platform puts no `k8s.io/cluster-autoscaler/*` tags on it, and refuses
+cluster labels with that prefix, which would become the group's tags.
+cluster-autoscaler is no longer in the catalog: on a cluster that has it, the
+shipped definition is deleted at the next controller start (`catalog.Sync`), the
+in-use finalizer keeps it until every cluster has removed it, and each cluster
+uninstalls its Helm release and IAM role as a catalog change (PROP-01 4.7),
+gated by the channel's code rollout and the freeze like any other.
+`instanceTypes` (a list of one architecture and
 one vCPU and memory class), `capacityType` and `diskSizeGiB` apply to new clusters only, since EKS cannot change them on a node
 group. Users cannot change the group's labels, taints or scaling.
 
@@ -656,8 +702,8 @@ with its own name, `WhenEmpty` consolidation by default, with limits, a disrupti
 and `terminationGracePeriod`. It is `Ready` when its two objects are `Ready`, not when it has nodes: pods
 create the nodes, so no wait for nodes can deadlock Karpenter. `status.nodeGroups` lists it after `system`
 (`platformManaged`). A deletion removes it in the node groups stage, before Karpenter's stage.
-`controller --check` sizes the bootstrap set (CPU, memory and pods per node: 17 on a `t3.medium`) against
-`nodeGroups.system`, and the platform set against `nodeGroups.platform.limits` and the shapes the pool allows.
+`controller --check` sizes what runs on the system group (CPU, memory and pods per node: 17 on a `t3.medium`) against
+`nodeGroups.system`, and the components placed on the pool against `nodeGroups.platform.limits` and the shapes the pool allows.
 
 **Tenant node groups.** `spec.nodeGroups` is a list of Karpenter node groups
 (at most 20, names unique and not `platform`, `platform-pool`, `default` or `system`). For each
@@ -672,10 +718,9 @@ that sets no architecture or capacity type gets the defaults. A cluster built
 before the system group existed has an old `platform` pool, removed once its
 components have moved off it.
 
-**Sizing.** The default group is 2 x `t3.medium`. The catalog's requests, the
-add-ons and the DaemonSets leave room for about 3 tenant pods per node at the
-minimum size. The pod count is the tight limit. cluster-autoscaler adds a node
-when pods are pending, up to `maxSize`. `pkg/catalog/system_group_sizing_test.go`
+**Sizing.** The default group is 2 x `t3.medium`. Only phase 1 counts against it:
+Karpenter, the add-ons and the DaemonSets. The pod count is the tight limit. No node is added
+when pods are pending there: the size is static. `pkg/catalog/system_group_sizing_test.go`
 fails the build when the shipped requests exceed 85 % of the default group's
 allocatable CPU or memory, or its pod capacity.
 
@@ -1663,8 +1708,8 @@ nodeGroups:
 |---|---|---|---|
 | `system.instanceTypes` | `--system-instance-types` | `CV_SYSTEM_INSTANCE_TYPES` | `t3.medium` |
 | `system.instanceType` | `--system-node-group-instance-type` | `CV_SYSTEM_NODE_GROUP_INSTANCE_TYPE` | none: deprecated, a list of one, warned about (not together with `instanceTypes`) |
-| `system.minSize` | `--system-node-group-min-size` | `CV_SYSTEM_NODE_GROUP_MIN_SIZE` | `2` (minimum 2) |
-| `system.maxSize` | `--system-node-group-max-size` | `CV_SYSTEM_NODE_GROUP_MAX_SIZE` | deprecated, warned about at start: the cluster-autoscaler ceiling (default 6, at least `minSize`) until it leaves the default set |
+| `system.minSize` | `--system-node-group-min-size` | `CV_SYSTEM_NODE_GROUP_MIN_SIZE` | `2` (minimum 2): the static size (min = max = desired) |
+| `system.maxSize` | `--system-node-group-max-size` | `CV_SYSTEM_NODE_GROUP_MAX_SIZE` | ignored, warned about at start (accepted so old configs still start) |
 | `system.size` | `--system-node-group-size` | `CV_SYSTEM_NODE_GROUP_SIZE` | none: the old fixed-size setting, an alias of `minSize` (two different values are an error) |
 | `system.capacityType` | `--system-node-group-capacity-type` | `CV_SYSTEM_NODE_GROUP_CAPACITY_TYPE` | `ON_DEMAND` |
 | `system.diskSizeGiB` | `--system-node-group-disk-size-gib` | `CV_SYSTEM_NODE_GROUP_DISK_SIZE_GIB` | `0` (EKS default) |
@@ -1677,8 +1722,7 @@ nodeGroups:
 | `karpenter.defaults.architectures` | `--node-group-default-architectures` | `CV_NODE_GROUP_DEFAULT_ARCHITECTURES` | `AMD64` |
 | `karpenter.defaults.capacityTypes` | `--node-group-default-capacity-types` | `CV_NODE_GROUP_DEFAULT_CAPACITY_TYPES` | `ON_DEMAND` |
 
-Startup fails with every problem listed: a `minSize` below 2, a `maxSize` below
-`minSize`, an empty `system.instanceTypes` or one that mixes architectures, a platform
+Startup fails with every problem listed: a `minSize` below 2, an empty `system.instanceTypes` or one that mixes architectures, a platform
 family or size not shaped like `m7i` or `xlarge`, a platform pool with more than one
 architecture, a family of another architecture than the pool's, `SPOT` in the platform pool,
 non-positive limits, a disruption budget below 1, `maxPods` above 110, an instance type not like `t3.large`, a family not like `t3`, a capacity
@@ -1960,7 +2004,7 @@ CV_E2E=1 go test -tags e2e ./test/e2e/ -v -run 'TestE2E/0[12]'   # scenarios 1 a
 
 The scenarios are subtests of `TestE2E`, in order, and share what they create: `01_account_onboarding`
 (onboarding, the access verdict of the role, what a reader or updater may not do), `02_network_create`,
-`03_cluster_create` (install order, platform components, system node group, autoscaler tags, results bucket,
+`03_cluster_create` (install order, platform components, system node group (static size, no autoscaler tags), results bucket,
 node lists), `04_cluster_update` (labels in place; a user Karpenter group `t3` with real nodes; its removal),
 `05_cluster_upgrade` (one minor, manually: steps in order, components skipped when unchanged),
 `06_scanners`, `07_cluster_delete` (seven stages, name reservation released, the same name again, deleted
@@ -1988,7 +2032,7 @@ killed run, delete the cluster and the network through the API (`cluster delete 
   `AccessVerified` True with `VerifiedForImport`; reader: both fail; provisioner: verified).
 - **Node group `status.atProvider` has the labels, taints, tags and scaling**, which the platform reads back:
   scenario 3 reads the system group from the managed resource and from EKS and asserts the pool label and
-  taint, the autoscaler tags (on that group only) and `min <= desired <= max` with `min >= 2`.
+  taint, no `k8s.io/cluster-autoscaler/*` tags (on any group) and `min = desired = max` with `min >= 2`.
 - **EKS accepts a node group update where min is above desired.** Only the shape is asserted on a new group;
   changing `nodeGroups.system.minSize` of the controller is not driven by the harness. Do it by hand between
   scenarios 3 and 4 and watch the system group stay `Ready` in `status.nodeGroups`.

@@ -22,27 +22,20 @@ kubernetes:
   channel: alpha
   default: true
   endOfSupport: "2028-01-31"      # placeholder: set your own
-  # Locked Helm values of a component on this minor only.
-  values:
-    cluster-autoscaler: {image: {tag: v1.37.0}}    # its image must be of the cluster's minor
 - minor: "1.36"
   nodeAmiPin: v20261107
   channel: beta
   upgradeTo: "1.37"
   endOfSupport: "2027-09-30"
-  values:
-    cluster-autoscaler: {image: {tag: v1.36.2}}
 - minor: "1.35"
   nodeAmiPin: v20261107
   channel: stable
   upgradeTo: "1.36"
   endOfSupport: "2027-05-31"
-  values:
-    cluster-autoscaler: {image: {tag: v1.35.3}}
 
 # A minor can also lock Helm values of a component on that minor only
-# (`values: {component: {...}}`): cluster-autoscaler's image must be of the
-# cluster's minor, and its chart hardcodes one image per chart release.
+# (`values: {component: {...}}`), for a component whose image must follow
+# the cluster's Kubernetes minor. None needs it today.
 #
 # Chart version of every component on every minor above. A minor's own
 # `components: {name: version}` overrides it on that minor only (a version
@@ -50,7 +43,6 @@ kubernetes:
 components:
   aws-load-balancer-controller: "3.6.2"
   capsule: "0.15.2"
-  cluster-autoscaler: "9.60.0"
   external-secrets: "2.15.0"
   gpu-operator: "v26.7.2"
   istio-base: "1.32.0"

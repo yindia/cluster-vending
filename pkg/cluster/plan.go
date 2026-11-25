@@ -94,21 +94,21 @@ func ChooseSubnets(subnets []PrivateSubnet, zoneIDs []string) ([]string, []strin
 // The default node pool is the platform's: omitted, it is filled with the
 // default instance type and capacity; its labels, taints and size are
 // always the fixed ones (crossplaneaws.FixedSystemNodePool), whatever the
-// request said; the minimum and maximum size are the platform admin's (a
-// render takes the admin's current ones, ClusterPlan.SystemPoolMin and
-// SystemPoolMax; desired is the minimum at creation only). Instance types, capacity type, AMI, disk and launch
-// template stay the client's.
+// request said; the size is the platform admin's static one, as min, max
+// and desired (a render takes the admin's current one,
+// ClusterPlan.SystemPoolSize). Instance types, capacity type, AMI, disk and
+// launch template stay the client's.
 func ResolveSpec(in *cloudv1.ClusterSpec, zones []string) (*cloudv1.ClusterSpec, error) {
 	return ResolveSpecWith(in, zones, SystemPool{})
 }
 
 // SystemPool is the platform admin's settings of the default node group of
-// a new cluster (--system-node-group-min-size and -max-size, --system-node-
-// group-instance-types). Zero values, and a minimum below
+// a new cluster (--system-node-group-min-size, the static size; --system-
+// node-group-instance-types). Zero values, and a size below
 // crossplaneaws.MinSystemPoolSize, are the defaults.
 type SystemPool struct {
-	MinSize, MaxSize int
-	InstanceTypes    []string
+	Size          int
+	InstanceTypes []string
 	// CapacityType ("ON_DEMAND", "SPOT") and DiskSizeGiB are used when the
 	// request names none; empty and 0: ON_DEMAND and EKS's default.
 	CapacityType string
@@ -179,14 +179,14 @@ func fixedNodePool(pool *cloudv1.NodePoolSpec, system SystemPool, hasLaunchTempl
 	if pool.DiskSizeGb == 0 && system.DiskSizeGiB > 0 && !hasLaunchTemplate {
 		pool.DiskSizeGb = uint32(system.DiskSizeGiB) //nolint:gosec // validated: at most 16384
 	}
-	fixed := crossplaneaws.FixedSystemNodePool(crossplaneaws.NodePoolPlan{}, system.MinSize, system.MaxSize)
+	fixed := crossplaneaws.FixedSystemNodePool(crossplaneaws.NodePoolPlan{}, system.Size)
 	pool.Labels = fixed.Labels
 	pool.Taints = nil
 	for _, t := range fixed.Taints {
 		pool.Taints = append(pool.Taints, &cloudv1.Taint{Key: t.Key, Value: t.Value, Effect: cloudv1.TaintEffect_TAINT_EFFECT_NO_SCHEDULE})
 	}
 	pool.ScalingConfig = &cloudv1.ScalingConfig{MinSize: uint32(fixed.MinSize), MaxSize: uint32(fixed.MaxSize), //nolint:gosec // small, validated settings
-		DesiredSize: ptr.To(uint32(fixed.Desired))} //nolint:gosec // the size at creation: the minimum
+		DesiredSize: ptr.To(uint32(fixed.Desired))} //nolint:gosec // the static size
 	return pool
 }
 
@@ -273,10 +273,10 @@ func RenderPlan(spec *cloudv1.ClusterSpec, subnetIDs []string, base crossplaneaw
 	// A cluster the platform created has the fixed default node group and
 	// Karpenter's setup, whatever its stored spec says (a cluster created
 	// before them is moved in place: nothing EKS cannot change changes,
-	// min and max are the admin's current ones, desired is not touched). An imported cluster (it has
+	// min, max and desired are the admin's current static size). An imported cluster (it has
 	// adopted objects) keeps what it has.
 	if !base.Imported() {
-		p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, base.SystemPoolMin, base.SystemPoolMax)
+		p.NodePool = crossplaneaws.FixedSystemNodePool(p.NodePool, base.SystemPoolSize)
 		p.Karpenter = true
 		p.ResultsBucket = true // rendered once the plan has the account (HasResultsBucket)
 	}

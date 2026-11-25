@@ -17,14 +17,16 @@ spec:
   # No cloudResources: the operator and its operands make no AWS API calls.
   platformValues:
     operator:
-      # The operator's own Deployment runs on the system node group; its
+      # The operator's own Deployment runs on the platform pool; its
       # operands (DaemonSets) keep the chart's GPU tolerations.
-      # The system node group: its labels, and a toleration per taint.
+      # Phase 2: Karpenter's platform pool (docs/architecture.md#node-layout,
+      # "Install order"): its labels, and a toleration of its taint. They have
+      # no value until Karpenter is Ready and the pool is, so this installs after.
       nodeSelector: ${platform.nodeSelector}
       tolerations: ${platform.tolerations}
     # Node Feature Discovery's own Deployments (the master, which also runs
     # the Job that prunes it on delete, and the garbage collector) run on the
-    # system node group too; its worker DaemonSet stays on GPU nodes.
+    # platform pool too; its worker DaemonSet stays on GPU nodes.
     node-feature-discovery:
       master:
         nodeSelector: ${platform.nodeSelector}

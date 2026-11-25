@@ -1691,7 +1691,7 @@ export enum ClusterUpgradePhase {
 
   /**
    * The add-ons are settled; the platform components move to to_version's
-   * values (e.g. cluster-autoscaler's image).
+   * values (a pin's values for that minor).
    *
    * @generated from enum value: CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS = 5;
    */

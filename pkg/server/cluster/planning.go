@@ -160,8 +160,8 @@ func (s *ClusterService) renderChanges(ctx context.Context, render crossplaneaws
 
 	snapshot := planning.Snapshot{Client: s.deps.Kube, Reader: s.deps.Reader(), Changes: corecluster.FieldChanges,
 		Prepare: func(body *unstructured.Unstructured) {
-			if body.GetKind() == "NodeGroup" {
-				crossplaneaws.DesiredSizeAtCreateOnly(body)
+			if adjust := crossplaneaws.NodeGroupAdjust(render); adjust != nil && body.GetKind() == "NodeGroup" {
+				adjust(body)
 			}
 		},
 		CreateDetail: func(body *unstructured.Unstructured) string { return corecluster.CreateDetail(body, replacing) },

@@ -38,15 +38,16 @@ const (
 	// placeholders: a string that is exactly ${system.nodeSelector} becomes
 	// the labels of the default managed node group (a map),
 	// ${system.tolerations} a list tolerating its taint ({key, operator:
-	// Equal, value, effect}). The platform has one node group, so these
-	// and the platform.* placeholders below are the same: 	// where tenant workloads do not. Only in platform values.
+	// Equal, value, effect}). Phase 1 of the install order uses them:
+	// Karpenter alone. Only in platform values.
 	VarSystemNodeSelector = "system.nodeSelector"
 	VarSystemTolerations  = "system.tolerations"
-	// VarPlatformNodeSelector and VarPlatformTolerations are aliases of the
-	// two above, kept so catalog values need not change: every platform
-	// component, the tenant's components and the add-on controllers run on
-	// the default managed node group. An imported cluster's components
-	// follow its default node pool (its labels and taints), as before.
+	// VarPlatformNodeSelector and VarPlatformTolerations are the same for
+	// Karpenter's platform pool (crossplaneaws.PoolPlatform): every other
+	// platform component and the tenant's components run there (phase 2).
+	// They have no value until the pool is Ready (WaitForPlatformPool), so
+	// those components wait for it. An imported cluster's components follow
+	// its default node pool (its labels and taints), as before.
 	VarPlatformNodeSelector = "platform.nodeSelector"
 	VarPlatformTolerations  = "platform.tolerations"
 
@@ -153,9 +154,9 @@ func VarsFor(cluster *cloudv1alpha1.Cluster, network *cloudv1alpha1.Network, acc
 	return v
 }
 
-// placement sets the whole-value placeholders of the node pools: a platform
-// cluster has one node group, the system one (platform.* is its alias); an
-// imported one has its own default pool.
+// placement sets the whole-value placeholders of the node pools: on a
+// platform cluster system.* is the system group and platform.* the
+// platform pool; an imported one has its own default pool for both.
 func placement(v Vars, cluster *cloudv1alpha1.Cluster) {
 	if cluster.Spec.ImportFrom != nil {
 		v[VarSystemNodeSelector] = systemNodeSelector(cluster.Spec.DefaultNodePool)
@@ -165,7 +166,8 @@ func placement(v Vars, cluster *cloudv1alpha1.Cluster) {
 	}
 	v[VarSystemNodeSelector] = mustJSON(crossplaneaws.PoolLabels(crossplaneaws.PoolSystem))
 	v[VarSystemTolerations] = mustJSON(crossplaneaws.PoolTolerations(crossplaneaws.PoolSystem))
-	v[VarPlatformNodeSelector], v[VarPlatformTolerations] = v[VarSystemNodeSelector], v[VarSystemTolerations]
+	v[VarPlatformNodeSelector] = mustJSON(crossplaneaws.PoolLabels(crossplaneaws.PoolPlatform))
+	v[VarPlatformTolerations] = mustJSON(crossplaneaws.PoolTolerations(crossplaneaws.PoolPlatform))
 }
 
 // Placement is where the pods of a node pool run: the labels they select and
@@ -176,15 +178,40 @@ type Placement struct {
 }
 
 // WithPlacement is v with the whole-value placeholders of the default
-// managed node group (system.*, and platform.* as its alias) set from the
-// placement the live node group carries now. It never changes v.
+// managed node group (system.*) set from the placement the live node group
+// carries now. It never changes v.
 func WithPlacement(v Vars, system Placement) Vars {
+	out := cloneVars(v)
+	out[VarSystemNodeSelector], out[VarSystemTolerations] = system.selectorJSON(), system.tolerationsJSON()
+	return out
+}
+
+// WithPlatformPlacement is v with platform.* set to p: for a cluster that
+// has no platform pool, whose components stay on the system group. It
+// never changes v.
+func WithPlatformPlacement(v Vars, p Placement) Vars {
+	out := cloneVars(v)
+	out[VarPlatformNodeSelector], out[VarPlatformTolerations] = p.selectorJSON(), p.tolerationsJSON()
+	return out
+}
+
+// WaitForPlatformPool is v without the platform.* values, why saying what
+// the pool waits for: the components placed on the platform pool wait
+// (phase 2) while the pool is not Ready. It never changes v.
+func WaitForPlatformPool(v Vars, why string) Vars {
+	out := cloneVars(v)
+	for _, name := range []string{VarPlatformNodeSelector, VarPlatformTolerations} {
+		delete(out, name)
+		out[whyKey(name)] = why
+	}
+	return out
+}
+
+func cloneVars(v Vars) Vars {
 	out := make(Vars, len(v)+4)
 	for k, val := range v {
 		out[k] = val
 	}
-	out[VarSystemNodeSelector], out[VarSystemTolerations] = system.selectorJSON(), system.tolerationsJSON()
-	out[VarPlatformNodeSelector], out[VarPlatformTolerations] = out[VarSystemNodeSelector], out[VarSystemTolerations]
 	return out
 }
 

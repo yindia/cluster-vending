@@ -652,8 +652,8 @@ spec:
                       desiredSize:
                         description: |-
                           desiredSize is the number of nodes the pool starts with. Defaults to
-                          minSize, at least 1. Applied at creation only: afterwards the
-                          autoscaler owns it.
+                          minSize, at least 1. The platform's default node group has one static
+                          size (minSize = maxSize = desiredSize), applied in place.
                         format: int32
                         maximum: 1000
                         minimum: 0

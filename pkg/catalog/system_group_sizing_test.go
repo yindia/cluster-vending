@@ -12,7 +12,7 @@ import (
 // The sizing rule itself is catalog.CheckSystemGroupSizing (the `controller
 // --check` rule); this file holds it to the SHIPPED catalog and the DEFAULT
 // system group: what the shipped catalog REQUESTS there must fit the default
-// group at its minimum size with headroom (docs/architecture.md#node-layout,
+// group at its static size with headroom (docs/architecture.md#node-layout,
 // "Sizing the system group").
 
 func TestAllocatableFollowsTheEKSReservations(t *testing.T) {
@@ -48,47 +48,13 @@ func TestSizingNamesEveryPlatformDefinition(t *testing.T) {
 	}
 }
 
-// The default system group, at its MINIMUM size, holds the platform's
+// The default system group, at its static size, holds the platform's
 // requests with headroom (pods limit included).
 func TestCatalogFitsTheDefaultSystemNodeGroup(t *testing.T) {
 	problems, summary := catalog.CheckSystemGroupSizing(catalogDefinitions(t), config.DefaultNodeGroups().System)
 	t.Log("\n" + summary)
 	for _, p := range problems {
 		t.Errorf("%s\n%s", p, summary)
-	}
-}
-
-// The autoscaler has room to add nodes by default, and what it may add is
-// at least what the DaemonSets of those nodes take: the maximum is above the
-// minimum, and a full group of MaxSize nodes still has room for pods.
-func TestDefaultSystemNodeGroupCanGrow(t *testing.T) {
-	group := config.DefaultNodeGroups().System
-	if group.MaxSize <= group.MinSize {
-		t.Fatalf("max %d is not above min %d: cluster-autoscaler could never add a node", group.MaxSize, group.MinSize)
-	}
-	shape, _ := catalog.InstanceShape(group.InstanceTypes[0])
-	nodeCPU, nodeMem := shape.Allocatable()
-	maxNodes := int64(group.MaxSize)
-	rows, problems := catalog.SizingTable(catalogDefinitions(t), maxNodes)
-	if len(problems) > 0 {
-		t.Fatal(problems)
-	}
-	var perNodeCPU, perNodeMem int64
-	var requested catalog.Usage
-	for _, l := range rows {
-		requested = requested.Plus(l.Total())
-	}
-	for _, ds := range catalog.AddonDaemonSetsPerNode() {
-		perNodeCPU += ds.Each.CPUMilli
-		perNodeMem += ds.Each.MemMiB
-	}
-	if requested.Pods >= maxNodes*shape.MaxPods || requested.CPUMilli >= nodeCPU*maxNodes || requested.MemMiB >= nodeMem*maxNodes {
-		t.Errorf("at the maximum of %d nodes the requests (%dm, %d MiB, %d pods) fill the group (%dm per node of DaemonSets %dm, %d MiB)",
-			maxNodes, requested.CPUMilli, requested.MemMiB, requested.Pods, nodeCPU, perNodeCPU, perNodeMem)
-	}
-	// Each added node nets room: its DaemonSets leave allocatable CPU and memory.
-	if nodeCPU-perNodeCPU <= 0 || nodeMem-perNodeMem <= 0 {
-		t.Error("a node's add-on DaemonSets take all of it: adding nodes would not help")
 	}
 }
 
@@ -111,7 +77,7 @@ func TestSizingTableIsNotEmpty(t *testing.T) {
 // The rule on its own: each way a group fails, and what is not counted.
 func TestCheckSystemGroupSizing(t *testing.T) {
 	group := func(instanceType string, min int) config.SystemNodeGroup {
-		return config.SystemNodeGroup{InstanceTypes: []string{instanceType}, MinSize: min, MaxSize: min + 4}
+		return config.SystemNodeGroup{InstanceTypes: []string{instanceType}, MinSize: min}
 	}
 	defs := catalogDefinitions(t)
 	without := func(name string) []component.Definition {
@@ -131,7 +97,9 @@ func TestCheckSystemGroupSizing(t *testing.T) {
 	}{
 		{"the default fits", defs, config.DefaultNodeGroups().System, nil},
 		{"a bigger instance fits", defs, group("t3.xlarge", 2), nil},
-		{"one small node does not", defs, group("t3.small", 1), []string{"CPU requests", "memory requests", "pods exceed"}},
+		// Phase 1 only (Karpenter, the add-ons, the
+		// DaemonSets): its CPU fits one t3.small, its memory and pods do not.
+		{"one small node does not", defs, group("t3.small", 1), []string{"memory requests", "pods exceed"}},
 		{"unknown instance type", defs, group("x9.huge", 2), []string{`"x9.huge" is not an instance type the sizing rule knows`}},
 		{"a definition no list names", append(append([]component.Definition{}, defs...),
 			component.Definition{Name: "extra", Management: component.Platform, HasInstall: true}), config.DefaultNodeGroups().System,
@@ -172,5 +140,41 @@ func TestDisabledComponentsAreNotSized(t *testing.T) {
 		if strings.HasPrefix(l.Name, "kyverno") {
 			t.Errorf("%s is counted although kyverno is disabled", l.Name)
 		}
+	}
+}
+
+// Only what runs on the system group is sized against it: a component on
+// the platform pool (phase 2) takes nothing from it, however large, and is
+// sized against the pool instead.
+func TestPlatformPoolComponentsAreNotSizedOnTheSystemGroup(t *testing.T) {
+	defs := catalogDefinitions(t)
+	for i := range defs {
+		if defs[i].Name != "istiod" {
+			continue
+		}
+		v := component.Values{}
+		for k, val := range defs[i].PlatformValues {
+			v[k] = val
+		}
+		v["autoscaleMin"] = 40
+		v["resources"] = map[string]any{"requests": map[string]any{"cpu": "4", "memory": "1Gi"}}
+		defs[i].PlatformValues = v
+	}
+
+	problems, summary := catalog.CheckSystemGroupSizing(defs, config.DefaultNodeGroups().System)
+
+	if len(problems) != 0 {
+		t.Errorf("a platform-pool component counted against the system group: %v", problems)
+	}
+	for _, name := range []string{"istiod", "kyverno-admission", "aws-load-balancer-controller", "external-secrets"} {
+		if strings.Contains(summary, name) {
+			t.Errorf("system group summary lists %s, which runs on the platform pool:\n%s", name, summary)
+		}
+	}
+	if !strings.Contains(summary, "karpenter") {
+		t.Errorf("system group summary lacks karpenter:\n%s", summary)
+	}
+	if problems, _ := catalog.CheckPlatformSizing(defs, config.DefaultNodeGroups().Platform); len(problems) == 0 {
+		t.Error("40 istiod replicas of 4 CPU fit the platform pool's default limits: the pool sizing did not count them")
 	}
 }

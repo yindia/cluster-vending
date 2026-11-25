@@ -30,7 +30,7 @@ export function clusterComputeDetails(cluster: Cluster, node: TopologyNodeData):
       { label: "Minimum nodes", value: pool?.scalingConfig ? String(pool.scalingConfig.minSize) : missing, source },
       { label: "Maximum nodes", value: pool?.scalingConfig ? String(pool.scalingConfig.maxSize) : missing, source },
       { label: "Current nodes", value: missing },
-      ...(pool?.scalingConfig?.desiredSize !== undefined ? [{ label: "Initial desired nodes", value: String(pool.scalingConfig.desiredSize), source: "Create-time setting; not the current autoscaler target" }] : []),
+      ...(pool?.scalingConfig?.desiredSize !== undefined ? [{ label: "Initial desired nodes", value: String(pool.scalingConfig.desiredSize), source: "Create-time setting; not the live node count" }] : []),
     ];
   }
   if (["Node", "Instance", "EC2Instance", "WorkerNode", "KarpenterNode"].includes(node.kind)) return [

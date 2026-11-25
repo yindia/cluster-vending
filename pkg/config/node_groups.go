@@ -15,7 +15,7 @@ import (
 //	nodeGroups:
 //	  system:                     # the bootstrap group: the default EKS managed node group
 //	    instanceTypes: [t3.medium] # new clusters only; existing ones keep theirs
-//	    minSize: 2                # at least 2; the fixed size (maxSize is deprecated)
+//	    minSize: 2                # at least 2; the static size (maxSize is ignored)
 //	    capacityType: ON_DEMAND
 //	    diskSizeGiB: 0            # 0: EKS's default
 //	  platform: {...}             # the platform pool (node_groups_platform.go)
@@ -67,13 +67,9 @@ const (
 	// MinSystemNodeGroupSize is the least the system group may have:
 	// Karpenter runs two replicas with anti-affinity.
 	MinSystemNodeGroupSize = 2
-	// DefaultSystemNodeGroupMinSize is the size at creation; the default
-	// maximum is how far cluster-autoscaler may grow the group (or the
-	// minimum, when that is higher).
+	// DefaultSystemNodeGroupMinSize is the group's static size unless the
+	// admin sets another: its min, max and desired size.
 	DefaultSystemNodeGroupMinSize = 2
-	// DefaultSystemNodeGroupMaxSize is the old cluster-autoscaler ceiling,
-	// kept until cluster-autoscaler leaves the default set (PROP-03 phase 4).
-	DefaultSystemNodeGroupMaxSize = 6
 	defaultCapacityType           = "ON_DEMAND"
 	defaultArchitecture           = "AMD64"
 	defaultInstanceFamily         = "t3"
@@ -100,9 +96,9 @@ var nodeGroupSettings = []Setting{
 	{Flag: FlagSystemNodeGroupSize, Env: EnvSystemNodeGroupSize,
 		Usage: "deprecated alias of --" + FlagSystemNodeGroupMinSize + " (nodeGroups.system.size)"},
 	{Flag: FlagSystemNodeGroupMinSize, Env: EnvSystemNodeGroupMinSize,
-		Usage: "minimum size of the system managed node group, and its size at creation (nodeGroups.system.minSize); default 2, at least 2: Karpenter runs two replicas with anti-affinity. A change applies to existing clusters in place, without touching the node count"},
+		Usage: "static size of the system managed node group: its min, max and desired size (nodeGroups.system.minSize); default 2, at least 2: Karpenter runs two replicas with anti-affinity. A change applies to existing clusters in place, and sets their node count"},
 	{Flag: FlagSystemNodeGroupMaxSize, Env: EnvSystemNodeGroupMaxSize,
-		Usage: "deprecated: maximum size of the system managed node group, which cluster-autoscaler grows it to until it leaves the default set (nodeGroups.system.maxSize); default 6, at least the minimum"},
+		Usage: "ignored: the system managed node group has one static size, --" + FlagSystemNodeGroupMinSize + " (nodeGroups.system.maxSize); accepted with a warning so old configs still start"},
 	{Flag: FlagSystemNodeGroupCapacityType, Env: EnvSystemNodeGroupCapacityType, Default: defaultCapacityType,
 		Usage: "capacity type of the system node group of NEW clusters, ON_DEMAND or SPOT (nodeGroups.system.capacityType)"},
 	{Flag: FlagSystemNodeGroupDiskSizeGiB, Env: EnvSystemNodeGroupDiskSizeGiB, Default: "0",
@@ -137,15 +133,13 @@ type NodeGroups struct {
 // Karpenter, CoreDNS and every platform and tenant component.
 type SystemNodeGroup struct {
 	// InstanceTypes, CapacityType and DiskSizeGiB apply to new clusters
-	// only. MinSize applies to every cluster, in place.
+	// only. MinSize (nodeGroups.system.minSize) is the static size, the
+	// group's min, max and desired size on every cluster, in place:
+	// nothing autoscales the group. The old maxSize key is ignored.
 	InstanceTypes []string
 	MinSize       int
-	// MaxSize is the ceiling cluster-autoscaler still grows the group to,
-	// until it leaves the default set (PROP-03 phase 4); the key is
-	// deprecated and warned about.
-	MaxSize      int
-	CapacityType string
-	DiskSizeGiB  int
+	CapacityType  string
+	DiskSizeGiB   int
 }
 
 // KarpenterNodeGroups is what users may create as their own node groups.
@@ -166,7 +160,7 @@ type NodeGroupDefaults struct {
 // DefaultNodeGroups is the layout when nothing is configured.
 func DefaultNodeGroups() NodeGroups {
 	return NodeGroups{
-		System:   SystemNodeGroup{InstanceTypes: []string{DefaultSystemNodeGroupInstanceType}, MinSize: DefaultSystemNodeGroupMinSize, MaxSize: DefaultSystemNodeGroupMaxSize, CapacityType: defaultCapacityType},
+		System:   SystemNodeGroup{InstanceTypes: []string{DefaultSystemNodeGroupInstanceType}, MinSize: DefaultSystemNodeGroupMinSize, CapacityType: defaultCapacityType},
 		Platform: defaultPlatformNodePool(),
 		Karpenter: KarpenterNodeGroups{InstanceFamilies: []string{defaultInstanceFamily},
 			Defaults: NodeGroupDefaults{Architectures: []string{defaultArchitecture}, CapacityTypes: []string{defaultCapacityType}}},
@@ -189,10 +183,10 @@ func nodeGroupsFrom(v map[string]string) (NodeGroups, []error) {
 	var warnings []string
 	out.System.InstanceTypes, errs, warnings = systemInstanceTypes(v, errs)
 	if v[FlagSystemNodeGroupMaxSize] != "" {
-		warnings = append(warnings, "nodeGroups.system.maxSize is deprecated: the bootstrap group has a fixed size (minSize). It still sets the cluster-autoscaler ceiling until cluster-autoscaler leaves the default set; remove it")
+		warnings = append(warnings, "nodeGroups.system.maxSize is ignored: the system group has one static size, minSize, and nothing autoscales it; remove it")
 	}
 	out.Warnings = warnings
-	out.System.MinSize, out.System.MaxSize, errs = systemSizes(v, errs)
+	out.System.MinSize, errs = systemSize(v, errs)
 	var err error
 	out.System.CapacityType, err = oneOf(setting(FlagSystemNodeGroupCapacityType), v[FlagSystemNodeGroupCapacityType], capacityTypes)
 	check(err)
@@ -243,11 +237,11 @@ func systemInstanceTypes(v map[string]string, errs []error) ([]string, []error, 
 	return types, errs, warnings
 }
 
-// systemSizes reads the system group's minimum and maximum. size is the
-// old fixed-size setting: it means the minimum (it may also be set to the
-// same number). An unset minimum is DefaultSystemNodeGroupMinSize, an unset
-// maximum DefaultSystemNodeGroupMaxSize or the minimum when that is higher.
-func systemSizes(v map[string]string, errs []error) (minSize, maxSize int, _ []error) {
+// systemSize reads the system group's static size, its minSize. size is
+// the old fixed-size setting, the same number (both may be set when they
+// are equal). Unset, it is DefaultSystemNodeGroupMinSize. The old maxSize
+// is not read: it is ignored (nodeGroupsFrom warns about it).
+func systemSize(v map[string]string, errs []error) (int, []error) {
 	number := func(flag string) (int, bool) {
 		raw := strings.TrimSpace(v[flag])
 		if raw == "" {
@@ -262,10 +256,9 @@ func systemSizes(v map[string]string, errs []error) (minSize, maxSize int, _ []e
 	}
 	size, hasSize := number(FlagSystemNodeGroupSize)
 	minSize, hasMin := number(FlagSystemNodeGroupMinSize)
-	maxSize, hasMax := number(FlagSystemNodeGroupMaxSize)
 	switch {
 	case hasSize && hasMin && size != minSize:
-		errs = append(errs, fmt.Errorf("%s and %s are different (%d and %d): size is the old name of the minimum, set one",
+		errs = append(errs, fmt.Errorf("%s and %s are different (%d and %d): size is the old name of minSize, set one",
 			setting(FlagSystemNodeGroupSize), setting(FlagSystemNodeGroupMinSize), size, minSize))
 	case hasSize && !hasMin:
 		minSize, hasMin = size, true
@@ -274,16 +267,10 @@ func systemSizes(v map[string]string, errs []error) (minSize, maxSize int, _ []e
 		minSize = DefaultSystemNodeGroupMinSize
 	}
 	if minSize < MinSystemNodeGroupSize {
-		errs = append(errs, fmt.Errorf("the system node group's minimum size (%s) must be at least %d (Karpenter runs two replicas with anti-affinity), got %d",
+		errs = append(errs, fmt.Errorf("the system node group's size (%s) must be at least %d (Karpenter runs two replicas with anti-affinity), got %d",
 			setting(FlagSystemNodeGroupMinSize), MinSystemNodeGroupSize, minSize))
 	}
-	if !hasMax {
-		maxSize = max(DefaultSystemNodeGroupMaxSize, minSize)
-	}
-	if maxSize < minSize {
-		errs = append(errs, fmt.Errorf("%s must be at least the minimum size (%d), got %d", setting(FlagSystemNodeGroupMaxSize), minSize, maxSize))
-	}
-	return minSize, maxSize, errs
+	return minSize, errs
 }
 
 func oneOf(s Setting, raw string, allowed []string) (string, error) {

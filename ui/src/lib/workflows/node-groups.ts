@@ -222,7 +222,7 @@ export interface NodeGroupRow extends Record<string, unknown> {
   /** What the system group is made of, from the cluster's default node pool; set on that row only. */
   system?: SystemGroupSummary;
 }
-/** `size` is the autoscaled range ("2–6 (autoscaled)"); `current` the node count now ("3 nodes now"), absent until the controller reports it. */
+/** `size` is the static size ("2 nodes"); `current` the node count now ("3 nodes now"), absent until the controller reports it. */
 export interface SystemGroupSummary { instanceTypes: string; capacity: string; size: string; current?: string }
 
 const phaseLabels: Record<number, [string, NodeGroupTone]> = {
@@ -236,9 +236,9 @@ export function phaseDisplay(phase: NodeGroupPhase): [string, NodeGroupTone] {
 const waiting = "Waiting for the controller to report this node group.";
 const systemWaiting = "Pending — waiting for the controller";
 
-/** "2–6 (autoscaled)": the default managed node group's minimum and maximum size; cluster-autoscaler moves it between them. */
+/** "2 nodes": the default managed node group's one static size; an imported group's own range is "1–3". Nothing autoscales it. */
 function systemSize(min: number, max: number): string {
-  return `${min}–${max} (autoscaled)`;
+  return min === max ? `${min} ${min === 1 ? "node" : "nodes"}` : `${min}–${max}`;
 }
 
 function systemSummary(pool: NodePoolSpec, nodes: number | undefined): SystemGroupSummary {

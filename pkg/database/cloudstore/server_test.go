@@ -249,9 +249,10 @@ func TestClusterServiceRunsOnTheKinds(t *testing.T) {
 
 	got, err := svc.GetCluster(ctx, &cloudv1.GetClusterRequest{TenantId: tenant, ClusterId: row.ID})
 	if err != nil || got.GetCluster().GetSpec().GetNetwork().GetNetworkId() != net.ID ||
-		// The default managed node group's bounds are the admin's, 2..6 by default
-		// (FixedSystemNodePool): the requested 2..4 is not kept.
-		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetMaxSize() != 6 ||
+		// The default managed node group has the admin's static size, 2 by
+		// default (FixedSystemNodePool): the requested 2..4 is not kept.
+		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetMaxSize() != 2 ||
+		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetDesiredSize() != 2 ||
 		got.GetCluster().GetSpec().GetDefaultNodePool().GetScalingConfig().GetMinSize() != 2 {
 		t.Fatalf("GetCluster = %v, %v", got.GetCluster().GetSpec(), err)
 	}

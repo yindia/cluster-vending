@@ -37,6 +37,11 @@ func mkDef(name string, mutate func(*cloudv1alpha1.ComponentDefinition)) cloudv1
 	return d
 }
 
+// withValues sets a definition's platform values from JSON.
+func withValues(d *cloudv1alpha1.ComponentDefinition, raw string) {
+	d.Spec.PlatformValues = &runtime.RawExtension{Raw: []byte(raw)}
+}
+
 func mkRelease(name string, serial int64, mutate func(*cloudv1alpha1.Release)) cloudv1alpha1.Release {
 	eos := metav1.NewTime(time.Date(2027, 9, 30, 0, 0, 0, 0, time.UTC))
 	pins := func() []cloudv1alpha1.ComponentPin {
@@ -137,6 +142,26 @@ func TestCheckRules(t *testing.T) {
 			[]string{"ComponentDefinition/mesh: spec.sequence 0 is karpenter's"}},
 		{"karpenter not at sequence 0", func(s *catalog.Set) { s.Definitions[0].Spec.Sequence = int32p(100) },
 			[]string{"ComponentDefinition/karpenter: spec.sequence must be 0"}},
+		{"karpenter on the platform pool", func(s *catalog.Set) { withValues(&s.Definitions[0], `{"nodeSelector":"${platform.nodeSelector}"}`) },
+			[]string{"ComponentDefinition/karpenter: karpenter must not run on the platform pool"}},
+		{"another definition on the system group", func(s *catalog.Set) {
+			withValues(&s.Definitions[1], `{"nodeSelector":"${system.nodeSelector}","tolerations":"${system.tolerations}"}`)
+		}, []string{"ComponentDefinition/mesh: only karpenter runs on the system group"}},
+		{"a definition on both pools", func(s *catalog.Set) {
+			withValues(&s.Definitions[1], `{"nodeSelector":"${system.nodeSelector}","tolerations":"${platform.tolerations}"}`)
+		}, []string{"ComponentDefinition/mesh: mesh uses both ${system.*} and ${platform.*}"}},
+		{"a system-group component requires one on the platform pool", func(s *catalog.Set) {
+			withValues(&s.Definitions[1], `{"nodeSelector":"${system.nodeSelector}","tolerations":"${system.tolerations}"}`)
+			s.Definitions = append(s.Definitions, mkDef("pooled", func(d *cloudv1alpha1.ComponentDefinition) {
+				withValues(d, `{"nodeSelector":"${platform.nodeSelector}","tolerations":"${platform.tolerations}"}`)
+			}))
+			s.Definitions[1].Spec.Requires = append(s.Definitions[1].Spec.Requires, "pooled")
+			s.Releases[0] = mkRelease("2026-11-a", 1, func(r *cloudv1alpha1.Release) {
+				for i := range r.Spec.Content.Kubernetes {
+					r.Spec.Content.Kubernetes[i].Components = append(r.Spec.Content.Kubernetes[i].Components, cloudv1alpha1.ComponentPin{Name: "pooled", Version: "1"})
+				}
+			})
+		}, []string{"ComponentDefinition/mesh: runs on the system group (phase 1) but requires pooled, which runs on the platform pool (phase 2)"}},
 		{"karpenter disabled", func(s *catalog.Set) { s.Definitions[0].Spec.Disabled = true },
 			[]string{"ComponentDefinition/karpenter: karpenter cannot be disabled"}},
 		{"a release without a serial", func(s *catalog.Set) { s.Releases[0].Spec.Serial = nil }, []string{"Release/2026-11-a: spec.serial is not set"}},
@@ -235,7 +260,7 @@ func TestCheckOrderIsStable(t *testing.T) {
 
 func TestCheckSystemGroupSizingRule(t *testing.T) {
 	s := goodSet()
-	small := config.SystemNodeGroup{InstanceTypes: []string{"t3.small"}, MinSize: 1, MaxSize: 2}
+	small := config.SystemNodeGroup{InstanceTypes: []string{"t3.small"}, MinSize: 1}
 	opts := checkOptions
 	opts.SystemGroup = &small
 	// karpenter's requests are not set in the small catalog: the rule says so.

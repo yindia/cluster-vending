@@ -56,7 +56,7 @@ func TestServeAndControllerReadTheSameNodeGroupsFromOneFile(t *testing.T) {
 	if !reflect.DeepEqual(serve.NodeGroups, controller.NodeGroups) {
 		t.Errorf("serve %+v != controller %+v", serve.NodeGroups, controller.NodeGroups)
 	}
-	if got := serve.NodeGroups.System; got.MaxSize != 9 || got.MinSize != 3 || !reflect.DeepEqual(got.InstanceTypes, []string{"m7i.large"}) {
+	if got := serve.NodeGroups.System; got.MinSize != 3 || !reflect.DeepEqual(got.InstanceTypes, []string{"m7i.large"}) {
 		t.Errorf("system = %+v", got)
 	}
 }
@@ -130,8 +130,8 @@ func TestLeftoverVariableStillOverridesTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.LoadController(nil, lookupIn(map[string]string{config.EnvSystemNodeGroupMaxSize: "12"}), file)
-	if err != nil || cfg.NodeGroups.System.MaxSize != 12 {
-		t.Errorf("max = %d (%v)", cfg.NodeGroups.System.MaxSize, err)
+	cfg, err := config.LoadController(nil, lookupIn(map[string]string{config.EnvSystemNodeGroupMinSize: "12"}), file)
+	if err != nil || cfg.NodeGroups.System.MinSize != 12 {
+		t.Errorf("size = %d (%v)", cfg.NodeGroups.System.MinSize, err)
 	}
 }

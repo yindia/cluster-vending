@@ -119,7 +119,7 @@ func TestOldBootstrapKeysStillParseWithAWarning(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", who, err)
 		}
-		if !reflect.DeepEqual(ng.System.InstanceTypes, []string{"m6i.large"}) || ng.System.MaxSize != 9 {
+		if !reflect.DeepEqual(ng.System.InstanceTypes, []string{"m6i.large"}) || ng.System.MinSize != 2 {
 			t.Errorf("%s: system = %+v", who, ng.System)
 		}
 		joined := strings.Join(ng.Warnings, "\n")

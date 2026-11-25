@@ -44,7 +44,9 @@ spec:
     global:
       # Every Kyverno workload (controllers, hook Jobs). The chart always adds
       # kubernetes.io/os: linux to the node selector.
-      # The cluster's default node pool: its labels, and a toleration per taint.
+      # Phase 2: Karpenter's platform pool (docs/architecture.md#node-layout,
+      # "Install order"): its labels, and a toleration of its taint. They have
+      # no value until Karpenter is Ready and the pool is, so this installs after.
       nodeSelector: ${platform.nodeSelector}
       tolerations: ${platform.tolerations}
     features:

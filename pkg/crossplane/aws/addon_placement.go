@@ -8,14 +8,22 @@ import (
 )
 
 // addonPlacement is how an add-on's configuration places its controller
-// pods: the keys of the object that takes "nodeSelector" and
-// "tolerations" (none: the top level), and the tolerations the add-on
-// has by default. EKS replaces a list as a whole, so the defaults are
-// written again after the pool's.
+// pods: the objects that take "nodeSelector" and "tolerations", each by
+// its keys (none: the top level only; an empty path is the top level),
+// and the tolerations the add-on has by default. EKS replaces a list as a
+// whole, so the defaults are written again after the pool's.
 type addonPlacement struct {
-	path               []string
+	paths              [][]string
 	defaultTolerations []map[string]any
 }
+
+// topLevel places an add-on's pods with keys at the top of its
+// configuration.
+var topLevel = [][]string{nil}
+
+// controller places an add-on's controller pods (its node DaemonSet
+// tolerates every taint already).
+var controller = [][]string{{"controller"}}
 
 // addonPlacements are the add-ons whose controller pods are placed by the
 // platform: on the default node pool, the system group (its labels become
@@ -35,27 +43,43 @@ type addonPlacement struct {
 //	                    controller.tolerations              https://gist.github.com/kcemenike-sb/1939bc036d201b21c2f1afc48934e4fd,
 //	                                                        https://github.com/kubernetes-sigs/aws-ebs-csi-driver/blob/master/charts/aws-ebs-csi-driver/values.yaml
 //
-// Not placed:
-//   - DaemonSets that run on every node and tolerate every taint already:
-//     vpc-cni, kube-proxy, eks-pod-identity-agent and the node pods of the
-//     EBS, EFS and FSx CSI drivers (node.tolerateAllTaints, operator
-//     Exists in their charts).
-//   - Add-ons whose schema is not confirmed from a public source: the
-//     controllers of aws-efs-csi-driver and aws-fsx-csi-driver (their
-//     charts have controller.nodeSelector and controller.tolerations, the
-//     add-on schema is unchecked), aws-mountpoint-s3-csi-driver,
-//     snapshot-controller, metrics-server, kube-state-metrics and
-//     cert-manager. A tenant sets their placement in the add-on's
-//     configurationValues.
+// The schemas of these were read with describe-addon-configuration
+// (us-west-1, Kubernetes 1.35, 2026-11-25):
+//
+//	metrics-server                v0.9.1-eksbuild.2    nodeSelector, tolerations
+//	kube-state-metrics            v2.20.0-eksbuild.11  nodeSelector, tolerations
+//	snapshot-controller           v8.7.0-eksbuild.5    nodeSelector, tolerations
+//	cert-manager                  v1.21.3-eksbuild.1   nodeSelector, tolerations, and the same
+//	                                                   under cainjector and webhook
+//	aws-efs-csi-driver            v3.6.0-eksbuild.1    controller.nodeSelector, controller.tolerations
+//	aws-fsx-csi-driver            v1.11.0-eksbuild.1   controller.nodeSelector, controller.tolerations
+//	aws-mountpoint-s3-csi-driver  v2.9.2-eksbuild.1    controller.nodeSelector, controller.tolerations
+//
+// Their charts have no default tolerations. Without a placement these
+// add-ons wait for tenant nodes: on a cluster without tenant node groups
+// their pods never run (only the tainted system group and Karpenter's
+// tainted platform pool exist).
+//
+// Not placed: DaemonSets that run on every node and tolerate every taint
+// already: vpc-cni, kube-proxy, eks-pod-identity-agent and the node pods
+// of the EBS, EFS, FSx and Mountpoint CSI drivers (node.tolerateAllTaints,
+// operator Exists in their charts).
 var addonPlacements = map[string]addonPlacement{
-	"coredns": {defaultTolerations: []map[string]any{
+	"coredns": {paths: topLevel, defaultTolerations: []map[string]any{
 		{"key": "CriticalAddonsOnly", "operator": "Exists"},
 		{"key": "node-role.kubernetes.io/control-plane", "effect": "NoSchedule"},
 	}},
-	AddonEBSCSI: {path: []string{"controller"}, defaultTolerations: []map[string]any{
+	AddonEBSCSI: {paths: controller, defaultTolerations: []map[string]any{
 		{"key": "CriticalAddonsOnly", "operator": "Exists"},
 		{"effect": "NoExecute", "operator": "Exists", "tolerationSeconds": 300},
 	}},
+	"metrics-server":               {paths: topLevel},
+	"kube-state-metrics":           {paths: topLevel},
+	"snapshot-controller":          {paths: topLevel},
+	"cert-manager":                 {paths: [][]string{nil, {"cainjector"}, {"webhook"}}},
+	"aws-efs-csi-driver":           {paths: controller},
+	"aws-fsx-csi-driver":           {paths: controller},
+	"aws-mountpoint-s3-csi-driver": {paths: controller},
 }
 
 // taintEffects maps the EKS spelling of a taint effect to Kubernetes'.
@@ -104,11 +128,33 @@ func (b clusterBuilder) placedConfiguration(a AddonPlan) string {
 			return a.ConfigurationValues
 		}
 	}
+	for _, path := range placement.paths {
+		target, ok := objectAt(values, path)
+		if !ok {
+			return a.ConfigurationValues
+		}
+		if _, set := target["nodeSelector"]; !set && len(labels) > 0 {
+			target["nodeSelector"] = labels
+		}
+		if _, set := target["tolerations"]; !set && len(taints) > 0 {
+			target["tolerations"] = slices.Concat(TolerationsOf(taints), placement.defaultTolerations)
+		}
+	}
+	out, err := json.Marshal(values) // keys sorted: the same plan renders the same string
+	if err != nil {
+		return a.ConfigurationValues
+	}
+	return string(out)
+}
+
+// objectAt is the object of values at path, made when missing; false when
+// a key on the way holds something other than an object.
+func objectAt(values map[string]any, path []string) (map[string]any, bool) {
 	target := values
-	for _, key := range placement.path {
+	for _, key := range path {
 		child, isMap := target[key].(map[string]any)
 		if _, set := target[key]; set && !isMap {
-			return a.ConfigurationValues
+			return nil, false
 		}
 		if child == nil {
 			child = map[string]any{}
@@ -116,17 +162,7 @@ func (b clusterBuilder) placedConfiguration(a AddonPlan) string {
 		}
 		target = child
 	}
-	if _, set := target["nodeSelector"]; !set && len(labels) > 0 {
-		target["nodeSelector"] = labels
-	}
-	if _, set := target["tolerations"]; !set && len(taints) > 0 {
-		target["tolerations"] = slices.Concat(TolerationsOf(taints), placement.defaultTolerations)
-	}
-	out, err := json.Marshal(values) // keys sorted: the same plan renders the same string
-	if err != nil {
-		return a.ConfigurationValues
-	}
-	return string(out)
+	return target, true
 }
 
 // DedicatedPoolWarning says, for a default node pool with a taint that

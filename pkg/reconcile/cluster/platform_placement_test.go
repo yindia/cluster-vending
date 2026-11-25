@@ -129,8 +129,9 @@ func installBoth(t *testing.T, w world) {
 	w.install(t)
 }
 
-// Every component, Karpenter's and the platform's alike (${platform.*} is
-// an alias of ${system.*}), follows the live node group: its old placement
+// Without the platform pool in the config, every component, Karpenter's
+// and the platform's alike (${platform.*} falls back to the system group),
+// follows the live node group: its old placement
 // until it really carries the system label and taint, then the system one.
 func TestPlacementFollowsTheLiveNodeGroup(t *testing.T) {
 	for _, tt := range []struct {

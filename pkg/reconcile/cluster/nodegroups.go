@@ -672,7 +672,7 @@ func (s *Reconciler) nodeGroupsInput(ctx context.Context, row *model.Cluster, sp
 type nodeGroupsExtra struct {
 	amiNotice, namespace, accountID string
 	// systemGroup is the default managed node group's object name and
-	// systemMin the minimum size the render gives it (the autoscaler may add nodes above it) ("" and 0: not known).
+	// systemMin the static size the render gives it ("" and 0: not known).
 	systemGroup string
 	systemMin   int
 }

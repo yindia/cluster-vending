@@ -29,7 +29,7 @@ func TestWarnLeftoverNodeGroupVariables(t *testing.T) {
 func TestWarnNodeGroups(t *testing.T) {
 	var out bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&out, nil))
-	warnNodeGroups(logger, config.NodeGroups{Warnings: []string{"nodeGroups.system.maxSize is deprecated"}})
+	warnNodeGroups(logger, config.NodeGroups{Warnings: []string{"nodeGroups.system.maxSize is ignored"}})
 	if got := out.String(); !strings.Contains(got, "level=WARN") || !strings.Contains(got, "nodeGroups.system.maxSize") {
 		t.Errorf("log = %q", got)
 	}

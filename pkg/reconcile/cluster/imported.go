@@ -35,7 +35,8 @@ const (
 
 // importSet is an import's objects as a set: nothing waits (they only
 // observe what exists), and a node group is applied with its desired size
-// at creation only, like every node group (crossplaneaws.ClusterSet).
+// at creation only, like an imported cluster's own group in
+// crossplaneaws.ClusterSet (NodeGroupAdjust).
 func importSet(objects []client.Object) sequence.Set {
 	set := sequence.Of(objects...)
 	for i, item := range set {

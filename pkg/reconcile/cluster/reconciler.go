@@ -165,10 +165,9 @@ func (s *Reconciler) Base(row *model.Cluster, a *model.CloudAccount) crossplanea
 		// a CONFIG_MAP one; it holds no cluster's readiness back.
 		LiveProviderConfigName: crossplaneaws.LiveProviderConfigName(a.ProviderConfigName),
 		LiveReaderRoleARN:      crossplaneaws.ReaderRoleARN(a.AccountID, a.Identity, a.ReaderRole),
-		// The admin's minimum and maximum size of the default (system) node
-		// group: they apply to every cluster, in place (never its desired
-		// size: that is cluster-autoscaler's).
-		SystemPoolMin: s.deps.NodeGroups.System.MinSize, SystemPoolMax: s.deps.NodeGroups.System.MaxSize,
+		// The admin's static size of the default (system) node group: its
+		// min, max and desired size on every cluster, in place.
+		SystemPoolSize: s.deps.NodeGroups.System.MinSize,
 	}
 }
 

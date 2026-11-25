@@ -264,11 +264,12 @@ type ScalingConfig struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	MinSize uint32                 `protobuf:"varint,1,opt,name=min_size,json=minSize,proto3" json:"min_size,omitempty"`
 	MaxSize uint32                 `protobuf:"varint,2,opt,name=max_size,json=maxSize,proto3" json:"max_size,omitempty"`
-	// Initial size, used at creation only. Defaults to max(min_size, 1). After
-	// creation the cluster autoscaler owns the node count: the server sets it
-	// through Crossplane `spec.initProvider` (AWS
-	// initProvider.scalingConfig.desiredSize), so it is never reconciled back
-	// and UpdateCluster ignores it. Only min_size / max_size are mutable.
+	// Initial size. Defaults to max(min_size, 1). The default node group of a
+	// cluster the platform created has one static size, the platform admin's:
+	// min, max and desired are equal and applied in place (nothing autoscales
+	// it). An imported cluster's group gets it at creation only, through
+	// Crossplane `spec.initProvider` (AWS initProvider.scalingConfig.desiredSize),
+	// so it is never reconciled back. UpdateCluster ignores it.
 	DesiredSize   *uint32 `protobuf:"varint,3,opt,name=desired_size,json=desiredSize,proto3,oneof" json:"desired_size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

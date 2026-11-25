@@ -192,8 +192,8 @@ type ScalingConfig struct {
 	// +kubebuilder:validation:Maximum=1000
 	MaxSize int32 `json:"maxSize"`
 	// desiredSize is the number of nodes the pool starts with. Defaults to
-	// minSize, at least 1. Applied at creation only: afterwards the
-	// autoscaler owns it.
+	// minSize, at least 1. The platform's default node group has one static
+	// size (minSize = maxSize = desiredSize), applied in place.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1000

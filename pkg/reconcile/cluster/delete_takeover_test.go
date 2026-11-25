@@ -31,8 +31,7 @@ import (
 // so its cloud resource goes with it.
 func TestDeletingATakenOverClusterKeepsItsAdoptedRoles(t *testing.T) {
 	deleted := map[string]string{} // object name -> its managementPolicies when deleted
-	var w world
-	w = newWorld(t, interceptor.Funcs{
+	w := newWorld(t, interceptor.Funcs{
 		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
 			gvk, err := apiutil.GVKForObject(obj, c.Scheme())
 			require.NoError(t, err)

@@ -25,7 +25,9 @@ spec:
       repository: https://blob.istio.io/istio-release/charts
       chart: istiod
   platformValues:
-    # The cluster's default node pool: its labels, and a toleration per taint.
+    # Phase 2: Karpenter's platform pool (docs/architecture.md#node-layout,
+    # "Install order"): its labels, and a toleration of its taint. They have
+    # no value until Karpenter is Ready and the pool is, so this installs after.
     nodeSelector: ${platform.nodeSelector}
     tolerations: ${platform.tolerations}
     # `--set profile=ambient` from the ambient guide. The profile sets

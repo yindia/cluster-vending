@@ -135,7 +135,7 @@ func warnLeftoverNodeGroupVariables(logger *slog.Logger, env config.LookupFunc) 
 }
 
 // warnNodeGroups logs the node group keys that still work but are on their
-// way out (nodeGroups.system.maxSize, nodeGroups.system.instanceType).
+// way out or ignored (nodeGroups.system.maxSize, nodeGroups.system.instanceType).
 func warnNodeGroups(logger *slog.Logger, ng config.NodeGroups) {
 	for _, w := range ng.Warnings {
 		logger.Warn(w)

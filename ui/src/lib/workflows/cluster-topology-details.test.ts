@@ -16,7 +16,7 @@ test("default-pool configuration requires an unambiguous observed identity", () 
   cluster.status!.architecture!.resources.push({ ...cluster.status!.architecture!.resources[0], name: "other" });
   assert.equal(configuredNodePool(cluster, node), undefined);
 });
-test("initial desired size must never masquerade as the live autoscaler target or node count", () => {
+test("initial desired size must never masquerade as the live node count", () => {
   const rows = clusterComputeDetails(fixture(), node);
   assert.equal(rows.find(row => row.label === "Initial desired nodes")!.value, "2");
   assert.equal(rows.find(row => row.label === "Desired nodes")!.value, "Not reported");

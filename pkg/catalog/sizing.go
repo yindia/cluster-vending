@@ -11,16 +11,16 @@ import (
 	"github.com/yindia/cluster-vending/pkg/config"
 )
 
-// The system managed node group runs Karpenter, cluster-autoscaler, the EKS
-// add-on controllers, every platform component and the DaemonSets of each
-// node. CheckSystemGroupSizing fails when what the enabled platform
-// components REQUEST there no longer fits the configured group at its
-// MINIMUM size with headroom: a chart bump, a definition edit or a smaller
+// The system managed node group runs phase 1 of the install order: Karpenter,
+// the EKS add-on controllers and the DaemonSets of each node. Every other platform
+// component runs on Karpenter's platform pool (${platform.*}) and is sized
+// against it (CheckPlatformSizing), not here. CheckSystemGroupSizing fails
+// when what the system group's components REQUEST there no longer fits the configured group at its
+// static size with headroom: a chart bump, a definition edit or a smaller
 // nodeGroups.system cannot silently outgrow it (docs/architecture.md#node-layout,
-// "Sizing the system group"). The group is autoscaled: when pending pods
-// need room, cluster-autoscaler adds nodes up to MaxSize, so what does not
-// fit at the minimum is a cost (more nodes), not an outage, but the
-// configured group should be one that needs none.
+// "Sizing the system group"). The group has one static size: nothing
+// autoscales it (Karpenter scales every other pool), so what does not fit
+// is pods left Pending there.
 //
 // Only what a definition's platformValues set is counted, so a component's
 // requests and replicas must be explicit there: a chart default is never
@@ -131,13 +131,11 @@ type workload struct {
 	name, replicas, requests string
 }
 
-// platformDeployments are the Deployments each Platform definition runs on
-// the system group. Karpenter's own two replicas are the only HA the
+// platformDeployments are the Deployments each Platform definition runs,
+// on the pool of its phase. Karpenter's own two replicas are the only HA the
 // platform keeps beyond CoreDNS and the EBS CSI controller (add-ons).
-// cluster-autoscaler runs one replica.
 var platformDeployments = map[string][]workload{
-	"cluster-autoscaler": {{"cluster-autoscaler", "replicaCount", "resources.requests"}},
-	"karpenter":          {{"karpenter", "replicas", "controller.resources.requests"}},
+	"karpenter": {{"karpenter", "replicas", "controller.resources.requests"}},
 	"kyverno": {
 		{"kyverno-admission", "admissionController.replicas", "admissionController.container.resources.requests"},
 		{"kyverno-background", "backgroundController.replicas", "backgroundController.resources.requests"},
@@ -264,7 +262,7 @@ func SizingTable(defs []component.Definition, nodes int64) ([]SizingLine, []stri
 }
 
 // CheckSystemGroupSizing reports what keeps the enabled platform
-// components and the add-ons from fitting the system group at its minimum
+// components and the add-ons from fitting the system group at its static
 // size: CPU and memory requests above SystemGroupFillLimit of what the
 // nodes allocate, more pods than they hold, an instance type the rule has
 // no size for, and what SizingTable could not count. The summary is the
@@ -274,13 +272,33 @@ func CheckSystemGroupSizing(defs []component.Definition, group config.SystemNode
 	if len(problems) > 0 {
 		return problems, ""
 	}
-	return fitGroup(defs, shape, typeName, int64(group.MinSize), "system node group")
+	onPool := poolRows(defs)
+	return fitGroup(defs, func(l SizingLine) bool { return !onPool(l) }, shape, typeName, int64(group.MinSize), "system node group")
+}
+
+// poolRows reports whether a sizing row runs on the platform pool: it is a
+// workload of a definition whose values place it with ${platform.*}. The
+// add-ons' rows never do.
+func poolRows(defs []component.Definition) func(SizingLine) bool {
+	pooled := map[string]bool{}
+	for _, d := range defs {
+		if phase, err := component.InstallPhaseOf(d); err != nil || phase != component.PhasePlatformPool {
+			continue
+		}
+		for _, w := range platformDeployments[d.Name] {
+			pooled[w.name] = true
+		}
+		if w, ok := platformDaemonSets[d.Name]; ok {
+			pooled[w.name] = true
+		}
+	}
+	return func(l SizingLine) bool { return pooled[l.Name] }
 }
 
 // fitGroup is the sizing table of defs (every enabled Platform component
-// and the add-ons) against nodes nodes of shape: CPU and memory at
-// SystemGroupFillLimit, and the pods the nodes hold.
-func fitGroup(defs []component.Definition, shape Shape, typeName string, nodes int64, label string) (problems []string, summary string) {
+// and the add-ons), the rows keep accepts, against nodes nodes of shape:
+// CPU and memory at SystemGroupFillLimit, and the pods the nodes hold.
+func fitGroup(defs []component.Definition, keep func(SizingLine) bool, shape Shape, typeName string, nodes int64, label string) (problems []string, summary string) {
 	nodeCPU, nodeMem := shape.Allocatable()
 	allocCPU, allocMem, maxPods := nodeCPU*nodes, nodeMem*nodes, shape.MaxPods*nodes
 
@@ -288,6 +306,9 @@ func fitGroup(defs []component.Definition, shape Shape, typeName string, nodes i
 	var sum Usage
 	var table strings.Builder
 	for _, l := range rows {
+		if !keep(l) {
+			continue
+		}
 		tot := l.Total()
 		sum = sum.Plus(tot)
 		fmt.Fprintf(&table, "  %-44s %2d x %4dm %5d MiB = %5dm %6d MiB %3d pods\n",

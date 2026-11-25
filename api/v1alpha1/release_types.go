@@ -56,8 +56,8 @@ type ComponentPin struct {
 	// +kubebuilder:validation:MaxLength=64
 	Version string `json:"version"`
 	// values are Helm values the release sets for the component on this
-	// Kubernetes minor (cluster-autoscaler's image tag follows the
-	// minor). They are merged over the definition's platformValues and
+	// Kubernetes minor (an image tag that must follow the minor). They
+	// are merged over the definition's platformValues and
 	// locked the same way: a tenant who touches one of their paths is
 	// refused. Placeholders are allowed. Unset: none.
 	// +optional

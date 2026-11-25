@@ -11,14 +11,15 @@ import (
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
 
-// The labels and taints the platform puts on the system node group, and the
-// tags that make cluster-autoscaler manage it (docs/architecture.md, Node layout).
+// The labels and taints the platform puts on the system node group
+// (docs/architecture.md, Node layout). Nothing autoscales it: it has no
+// cluster-autoscaler tags.
 const (
-	poolLabel            = "node.cluster-vending.io/pool"
-	poolValue            = "system"
-	tagAutoscalerEnabled = "k8s.io/cluster-autoscaler/enabled"
-	systemGroup          = "system"
-	minSystemSize        = 2 // Karpenter runs two replicas
+	poolLabel           = "node.cluster-vending.io/pool"
+	poolValue           = "system"
+	tagAutoscalerPrefix = "k8s.io/cluster-autoscaler/"
+	systemGroup         = "system"
+	minSystemSize       = 2 // Karpenter runs two replicas
 )
 
 type taint struct{ key, value, effect string }
@@ -81,15 +82,16 @@ func factsFromAWS(out map[string]any) ngFacts {
 	return f
 }
 
-// assertSystemGroup asserts the system node group's size, labels, taints
-// and the cluster-autoscaler tags.
+// assertSystemGroup asserts the system node group's static size (min =
+// desired = max), labels and taints, and that it has no cluster-autoscaler
+// tags.
 func assertSystemGroup(t *testing.T, cluster string, f ngFacts) {
 	t.Helper()
 	t.Logf("system node group per %s: min=%d desired=%d max=%d labels=%v taints=%v tags=%v", f.source, f.min, f.desired, f.max, f.labels, f.taints, f.tags)
 	if !f.found["scaling"] {
 		t.Errorf("%s: no scalingConfig", f.source)
-	} else if f.min < minSystemSize || f.max < f.min || f.desired < f.min || f.desired > f.max {
-		t.Errorf("%s: scaling min=%d desired=%d max=%d, want min >= %d and min <= desired <= max", f.source, f.min, f.desired, f.max, minSystemSize)
+	} else if f.min < minSystemSize || f.max != f.min || f.desired != f.min {
+		t.Errorf("%s: scaling min=%d desired=%d max=%d, want one static size of at least %d", f.source, f.min, f.desired, f.max, minSystemSize)
 	}
 	if f.labels[poolLabel] != poolValue {
 		t.Errorf("%s: label %s=%q, want %q (labels %v)", f.source, poolLabel, f.labels[poolLabel], poolValue, f.labels)
@@ -104,11 +106,10 @@ func assertSystemGroup(t *testing.T, cluster string, f ngFacts) {
 	if !hasTaint {
 		t.Errorf("%s: no taint %s=%s:NoSchedule (taints %v)", f.source, poolLabel, poolValue, f.taints)
 	}
-	if f.tags[tagAutoscalerEnabled] != "true" {
-		t.Errorf("%s: tag %s=%q, want true", f.source, tagAutoscalerEnabled, f.tags[tagAutoscalerEnabled])
-	}
-	if got := f.tags["k8s.io/cluster-autoscaler/"+cluster]; got != "owned" {
-		t.Errorf("%s: tag k8s.io/cluster-autoscaler/%s=%q, want owned", f.source, cluster, got)
+	for key := range f.tags {
+		if strings.HasPrefix(key, tagAutoscalerPrefix) {
+			t.Errorf("%s: tag %s on cluster %s: nothing autoscales the system group", f.source, key, cluster)
+		}
 	}
 }
 
@@ -169,13 +170,15 @@ func (e *env) checkSystemGroup(ctx context.Context, t *testing.T, c *cloudv1.Clu
 			assertSystemGroup(t, c.GetName(), factsFromAWS(out))
 			read = true
 		}
-		e.assertOnlySystemGroupAutoscaled(ctx, t, c.GetName(), awsNodeGroupName(mr.GetExternalName()))
+		e.assertNoOtherGroupAutoscaled(ctx, t, c.GetName(), awsNodeGroupName(mr.GetExternalName()))
 	}
 	return read
 }
 
-// assertOnlySystemGroupAutoscaled: the autoscaler tags are on that group alone.
-func (e *env) assertOnlySystemGroupAutoscaled(ctx context.Context, t *testing.T, cluster, system string) {
+// assertNoOtherGroupAutoscaled: no other node group carries
+// cluster-autoscaler tags either (the system group is checked by
+// assertSystemGroup).
+func (e *env) assertNoOtherGroupAutoscaled(ctx context.Context, t *testing.T, cluster, system string) {
 	t.Helper()
 	list, err := e.awsJSON(ctx, e.cfg.Region, "eks", "list-nodegroups", "--cluster-name", cluster)
 	if err != nil {
@@ -192,8 +195,10 @@ func (e *env) assertOnlySystemGroupAutoscaled(ctx context.Context, t *testing.T,
 			t.Errorf("describe node group %s: %v", n, err)
 			continue
 		}
-		if stringMap(at(out, "nodegroup", "tags"))[tagAutoscalerEnabled] != "" {
-			t.Errorf("node group %s carries %s: only the system group may", n, tagAutoscalerEnabled)
+		for key := range stringMap(at(out, "nodegroup", "tags")) {
+			if strings.HasPrefix(key, tagAutoscalerPrefix) {
+				t.Errorf("node group %s carries %s: nothing autoscales managed node groups", n, key)
+			}
 		}
 	}
 }

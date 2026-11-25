@@ -153,8 +153,10 @@ func withPlatform(st *cloudv1.ClusterStatus, p *platform) {
 // recorded apart from the cluster's own (model.OwnerClusterComponents), so
 // the cluster's state never waits for them.
 //
-// Nothing is installed before the cluster is RUNNING (its node group is
-// ready and its kubeconfig exists), on an imported cluster that was not
+// Nothing is installed before the cluster can take Helm charts (its EKS
+// cluster, a node group and its kubeconfig are Ready: platformCanStart,
+// not RUNNING, which an add-on waiting for Karpenter's nodes would hold
+// back for good), on an imported cluster that was not
 // taken over (noPlatform; a taken-over one gets them like any cluster,
 // unless its takeover kept them off), or while the cluster is being
 // deleted. Once started it goes on through updates. nil
@@ -173,8 +175,11 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	if err != nil {
 		return nil, err
 	}
-	if row.State != StateRunning && len(records) == 0 {
-		return nil, nil
+	if len(records) == 0 {
+		start, err := s.platformCanStart(ctx, row)
+		if err != nil || !start {
+			return nil, err
+		}
 	}
 	in, release, problem, err := s.platformInput(ctx, row, len(records) > 0, false)
 	if err != nil {
@@ -554,7 +559,7 @@ func channelOf(spec *cloudv1.ClusterSpec) string {
 }
 
 // componentsMinor is the Kubernetes minor the components are planned for
-// (their pins and values, e.g. cluster-autoscaler's image): during an
+// (their pins and values, e.g. an image that follows the minor): during an
 // upgrade the minor they run (the upgrade's from_version) until the
 // upgrade reaches their step (the platform components', for tenant false;
 // the tenant components', for tenant true), the spec's then and when no
@@ -613,9 +618,10 @@ func kubernetesMinor(version string) string {
 
 // platformVars are a component's placeholder values: the cluster's, as
 // its recorded status has them (endpoint, issuer), its network's VPC, its
-// account, the default node pool's labels and taints, and the component's
-// own role and policy as the management cluster has them now. What does
-// not exist yet is left empty: the component then waits.
+// account, the system group's labels and taints, the platform pool's once
+// it is Ready (platformPoolWait), and the component's own role and policy
+// as the management cluster has them now. What does not exist yet is left
+// empty: the component then waits.
 func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, t Target,
 	clusterPlan crossplaneaws.ClusterPlan, iam crossplaneaws.ComponentIAMPlan, irsa bool, nodeGroup string, installed bool) func(string) component.Vars {
 	recorded := storedStatus(row)
@@ -640,6 +646,7 @@ func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec 
 	}
 	nodeRole := crossplaneaws.NodeRoleName(clusterPlan)
 	live, liveErr := s.livePlacement(ctx, cluster, clusterPlan.Namespace, nodeGroup, installed)
+	poolWait := s.platformPoolWait(ctx, row, cluster.Spec.ImportFrom != nil)
 	return func(name string) component.Vars {
 		p := iam
 		p.Component = name
@@ -656,11 +663,16 @@ func (s *Reconciler) platformVars(ctx context.Context, row *model.Cluster, spec 
 		if live != nil {
 			vars = component.WithPlacement(vars, *live)
 		}
+		vars = s.withPlatformPool(vars, live, poolWait)
 		if liveErr != nil {
-			// The node group cannot be read: the placement is not known,
-			// so the components that use it wait rather than move.
-			for _, n := range []string{component.VarSystemNodeSelector, component.VarSystemTolerations,
-				component.VarPlatformNodeSelector, component.VarPlatformTolerations} {
+			// The node group cannot be read: the system placement is not
+			// known (nor the platform one, where it is the system's), so
+			// the components that use it wait rather than move.
+			names := []string{component.VarSystemNodeSelector, component.VarSystemTolerations}
+			if !s.platformPoolOn() {
+				names = append(names, component.VarPlatformNodeSelector, component.VarPlatformTolerations)
+			}
+			for _, n := range names {
 				delete(vars, n)
 			}
 		}

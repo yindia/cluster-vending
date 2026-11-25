@@ -16,7 +16,8 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
-// livePlacement resolves ${system.*} (and its alias ${platform.*}) from live
+// livePlacement resolves ${system.*} (and ${platform.*} on a cluster
+// without the platform's pool: withPlatformPool) from live
 // state, never from what the platform intends to roll out
 // (docs/architecture.md#node-layout, "Migration of existing clusters"):
 // it is what the default managed node group carries now: its labels and

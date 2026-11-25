@@ -20,9 +20,14 @@ func Validate(msg proto.Message) error {
 }
 
 // reservedTagPrefixes are the tag key prefixes the platform writes itself
-// (ownership, Karpenter and Kubernetes discovery, the cluster autoscaler): a
-// label with such a key would be overridden by the platform's tag on every
-// resource, silently. Matched without regard to case.
+// (ownership, Karpenter and Kubernetes discovery): a label with such a key
+// would be overridden by the platform's tag on every resource, silently.
+// k8s.io/cluster-autoscaler/ stays reserved though the platform no longer
+// writes it: labels become the system node group's tags, which EKS copies
+// to its Auto Scaling group, and those tags would make the static group
+// one a cluster-autoscaler discovers (one still running on a cluster that
+// has not removed it yet, or one a tenant brings) and resizes. Matched
+// without regard to case.
 var reservedTagPrefixes = []string{"cluster-vending.io/", "karpenter.sh/", "kubernetes.io/cluster/", "k8s.io/cluster-autoscaler/"}
 
 // CheckAWSLabels refuses labels AWS cannot take as tags: keys starting

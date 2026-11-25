@@ -430,7 +430,7 @@ const (
 	// versions EKS recommends for it (or the ones the client pinned).
 	ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_ADDONS ClusterUpgradePhase = 4
 	// The add-ons are settled; the platform components move to to_version's
-	// values (e.g. cluster-autoscaler's image).
+	// values (a pin's values for that minor).
 	ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_PLATFORM_COMPONENTS ClusterUpgradePhase = 5
 	// The platform components are settled; the tenant's components move.
 	ClusterUpgradePhase_CLUSTER_UPGRADE_PHASE_TENANT_COMPONENTS ClusterUpgradePhase = 6

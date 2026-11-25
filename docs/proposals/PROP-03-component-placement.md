@@ -71,6 +71,10 @@ Secrets) have no place to grow except this group. The design targets of 1,000 no
   default sequence, Karpenter waited for the platform node group and the group for
   Karpenter, so every platform component stayed Pending. That is the deadlock this
   proposal has to avoid again.
+- Later: cluster-autoscaler removed from the catalog for good; the `system` group is static
+  (min = max = desired = `minSize`, applied in place) and Karpenter is the only scaler.
+  Existing clusters uninstall it as a catalog change (the deleted definition is off). The
+  M3 drain check below is not built: a shrink is EKS's managed scale-in.
 
 The reasons for `cc7dc5a` are not in the repository. The inferred reasons, which the
 design below treats as the constraints to meet and not as settled facts: the platform

@@ -299,6 +299,7 @@ func (s store) insert(ctx context.Context, obj client.Object, set func()) error 
 		return translate(err)
 	}
 	uid := obj.GetUID()
+	gone := false
 	err := retry(func() error {
 		set()
 		err := s.c.Status().Update(ctx, obj)
@@ -306,6 +307,7 @@ func (s store) insert(ctx context.Context, obj client.Object, set func()) error 
 			return err
 		}
 		if gerr := s.c.Get(ctx, client.ObjectKeyFromObject(obj), obj); gerr != nil {
+			gone = apierrors.IsNotFound(gerr)
 			return gerr
 		}
 		if obj.GetUID() != uid {
@@ -314,8 +316,8 @@ func (s store) insert(ctx context.Context, obj client.Object, set func()) error 
 		return err
 	})
 	if err != nil {
-		if obj.GetUID() != uid {
-			return translate(err) // another object now: not ours to take back
+		if gone || obj.GetUID() != uid {
+			return translate(err) // deleted, or another object now: nothing to take back
 		}
 		if derr := s.c.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationOrphan)); derr != nil {
 			return errors.Join(translate(err), fmt.Errorf("take %s back: %w", obj.GetName(), derr))

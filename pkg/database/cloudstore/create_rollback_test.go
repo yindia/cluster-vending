@@ -3,12 +3,14 @@ package cloudstore_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -388,5 +390,24 @@ func TestCreateSurvivesFinalizerAddedBeforeStatusWrite(t *testing.T) {
 	n.Spec = document(t, networkSpec(n))
 	if err := s.Networks().Create(t.Context(), n); err != nil {
 		t.Fatalf("network create with a finalizer added meanwhile: %v", err)
+	}
+}
+
+// A cluster deleted between a conflicting status write and its re-read is
+// simply not created: there is nothing left to take back.
+func TestCreateOfAClusterDeletedMidRetryFailsCleanly(t *testing.T) {
+	w := newWorld(t)
+	deleted := interceptor.NewClient(w.k.(client.WithWatch), interceptor.Funcs{SubResourceUpdate: func(ctx context.Context, c client.Client, sub string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+		if err := c.Delete(ctx, obj.DeepCopyObject().(client.Object)); err != nil {
+			t.Fatal(err)
+		}
+		return apierrors.NewConflict(schema.GroupResource{Resource: "clusters"}, obj.GetName(), errors.New("modified"))
+	}})
+	s := cloudstore.New(deleted)
+
+	err := s.Clusters().Create(t.Context(), reservationCluster(t, w.network, "vanished"))
+
+	if !errors.Is(err, repository.ErrNotFound) || strings.Contains(err.Error(), "take") {
+		t.Fatalf("create of a cluster deleted mid-retry: %v, want a plain not found", err)
 	}
 }

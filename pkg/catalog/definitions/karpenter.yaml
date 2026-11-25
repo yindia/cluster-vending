@@ -6,7 +6,7 @@ spec:
   # The cloud it is installed on; the same component for another cloud is
   # another definition, <name>-<provider> (docs/architecture.md#components-and-the-catalog).
   provider: aws
-  description: Karpenter node autoscaler. It launches EC2 nodes for the platform pool and the cluster's own (user) node groups; the platform applies their NodePools and EC2NodeClasses itself, this definition ships no chart for them. It runs on the system managed node group; the platform's other components run on its platform pool (docs/architecture.md#node-layout).
+  description: Karpenter node autoscaler. It launches EC2 nodes for the platform pool, the only Karpenter pool a cluster has; the platform applies its NodePool and EC2NodeClass itself, this definition ships no chart for them. It runs on the system managed node group; the platform's other components run on its platform pool (docs/architecture.md#node-layout).
   # Installed with every cluster by the platform; not a tenant's to enable.
   management: Platform
   # The node provisioner (pkg/component/roles.go): by its role it installs

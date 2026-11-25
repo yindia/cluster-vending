@@ -140,6 +140,8 @@ func (s *Reconciler) codeApplied(ctx context.Context, row *model.Network, render
 
 // A successful SSA is not cloud convergence. Read current provider generations
 // directly; cached Ready=True from before the render must not finish a canary.
+// A provider that stamps no generation is read by when it last wrote status
+// (observedSinceApply).
 func (s *Reconciler) codeResourcesConverged(ctx context.Context, row *model.Network, rendered map[string]string) (bool, error) {
 	records, err := s.deps.Store.ManagedResources().ListByOwner(ctx, model.OwnerNetwork, row.ID)
 	if err != nil {
@@ -162,8 +164,13 @@ func (s *Reconciler) codeResourcesConverged(ctx context.Context, row *model.Netw
 		if view.State == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED {
 			return false, fmt.Errorf("network code resource %s failed: %s", record.Name, view.Message)
 		}
-		if managedResource && view.Generation > 0 && view.ObservedGeneration == 0 {
-			return false, fmt.Errorf("network code resource %s has no Synced.observedGeneration; waiting for the supported provider's generation-aware observation", record.Name)
+		// Without a provider generation, a status write after the platform's
+		// apply is what shows the conditions observed the new render.
+		generationAware := view.ObservedGeneration > 0
+		if managedResource && view.Generation > 0 && !generationAware {
+			if current, why := observedSinceApply(object, time.Now()); !current {
+				return false, fmt.Errorf("network code resource %s: %s", record.Name, why)
+			}
 		}
 		conditions, _, _ := unstructured.NestedSlice(object.Object, "status", "conditions")
 		for _, raw := range conditions {
@@ -183,7 +190,7 @@ func (s *Reconciler) codeResourcesConverged(ctx context.Context, row *model.Netw
 				}
 			}
 		}
-		if view.State != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY || view.Paused || managedResource && (view.Generation > view.ObservedGeneration || view.Synced != cloudv1.ConditionStatus_CONDITION_STATUS_TRUE) {
+		if view.State != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY || view.Paused || managedResource && (generationAware && view.Generation > view.ObservedGeneration || view.Synced != cloudv1.ConditionStatus_CONDITION_STATUS_TRUE) {
 			return false, nil
 		}
 	}

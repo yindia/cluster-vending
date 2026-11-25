@@ -165,6 +165,17 @@ func TestNetworkCanaryRejectsOldReadyObservations(t *testing.T) {
 	if !networkCodeReady(&n) {
 		t.Fatal("current-generation provider convergence not accepted")
 	}
+	// A provider that publishes no observedGeneration (provider-aws v2.9.0):
+	// the network's reconciler proved the observation came after its apply
+	// before it marked the change Done, so READY is the provider's word.
+	n.Status.ContractStatus = &runtime.RawExtension{Raw: []byte(`{"codeChange":{"target":"new/dev"},"managedResources":[{"generation":"3","state":"MANAGED_RESOURCE_STATE_READY"}]}`)}
+	if !networkCodeReady(&n) {
+		t.Fatal("a Ready resource of a provider without observedGeneration held the network back")
+	}
+	n.Status.ContractStatus = &runtime.RawExtension{Raw: []byte(`{"codeChange":{"target":"new/dev"},"managedResources":[{"generation":"3","state":"MANAGED_RESOURCE_STATE_CREATING"}]}`)}
+	if networkCodeReady(&n) {
+		t.Fatal("a resource that is not Ready credited without observedGeneration")
+	}
 }
 
 func TestNetworkFailuresConsumeChannelFailureBudget(t *testing.T) {

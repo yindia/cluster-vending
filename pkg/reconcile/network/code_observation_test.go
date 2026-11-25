@@ -51,7 +51,8 @@ func TestCodeConvergenceRequiresPinnedProviderObservedGeneration(t *testing.T) {
 	// provider-upjet-aws v2.9.0 pins Crossplane Runtime commit 9b2fb6b1d1ff.
 	// Its managed reconciler installs ObservedGenerationPropagationManager at
 	// reconciler.go:988; pkg/conditions/manager.go MarkConditions stamps Synced
-	// with the observed generation. Missing legacy observations fail closed.
+	// with the observed generation. Conditions without one are read by
+	// observedSinceApply; with no platform apply on record they fail closed.
 	for _, test := range []struct {
 		name                    string
 		observed, readyObserved int64
@@ -59,7 +60,7 @@ func TestCodeConvergenceRequiresPinnedProviderObservedGeneration(t *testing.T) {
 		want                    bool
 		why                     string
 	}{
-		{"missing legacy observation", 0, 0, "True", false, "no Synced.observedGeneration"},
+		{"missing legacy observation", 0, 0, "True", false, "no apply by the platform"},
 		{"old Ready and old Synced", 1, 1, "True", false, ""},
 		{"old explicit Ready generation", 2, 1, "True", false, ""},
 		{"async still running", 2, 0, "False", false, ""},

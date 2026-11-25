@@ -96,3 +96,28 @@ func TestNetworkCodeAdmitted(t *testing.T) {
 		})
 	}
 }
+
+// A code change is the platform's own fix: a failed platform or tenant
+// component does not hold it back (the change may be what repairs it), so
+// a component broken by a render bug can always get the fixed render. The
+// cluster's own readiness, freezes and the window still gate it.
+func TestCodeChangeIsNotHeldByComponents(t *testing.T) {
+	broken := withCode(cluster("dev", cloudv1alpha1.ClusterTier2, "1.36"), convert.CodeChangePending)
+	broken.Status.PlatformComponents = []cloudv1alpha1.PlatformComponentStatus{{Name: "karpenter", Phase: "Ready"},
+		{Name: "capsule", Phase: "Failed"}}
+
+	got := ComputeCode(input(broken))
+
+	if !slices.Equal(got.Admitted, []string{"tenant-acme/dev"}) {
+		t.Fatalf("a failed component held the code change back: %+v", got)
+	}
+
+	notReady := broken
+	notReady.Status.Conditions = slices.Clone(broken.Status.Conditions)
+	notReady.Status.Conditions[0].Status = metav1.ConditionFalse
+	notReady.Status.Phase = cloudv1alpha1.ClusterPhaseProvisioning
+	if got := ComputeCode(input(notReady)); len(got.Admitted) != 0 || len(got.Blocked) != 1 ||
+		got.Blocked[0].Gate != string(upgrade.GateNotReady) {
+		t.Errorf("a cluster that is not Ready must still wait: %+v", got)
+	}
+}

@@ -133,7 +133,11 @@ func networkCodeReady(network *cloudv1alpha1.Network) bool {
 			return false
 		}
 		for _, resource := range status.ManagedResources {
-			if resource.Kind != "Usage" && resource.Generation > resource.ObservedGeneration || resource.State != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY || resource.Paused {
+			// No observedGeneration: the provider publishes none (provider-aws
+			// v2.9.0). The network's reconciler proved the observation came
+			// after its apply before it marked the change Done, so READY counts.
+			stale := resource.ObservedGeneration > 0 && resource.Generation > resource.ObservedGeneration
+			if resource.Kind != "Usage" && stale || resource.State != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY || resource.Paused {
 				return false
 			}
 		}
@@ -230,9 +234,13 @@ func (in memberInputs) codeMember(c *cloudv1alpha1.Cluster) (m upgrade.Member, g
 		return m, gate, true
 	}
 	// The gates of a Kubernetes hop, without the mode (a code change is
-	// the platform's) and the deprecation scan (it keeps the minor).
+	// the platform's), the deprecation scan (it keeps the minor) and the
+	// health of the components: the change may be what repairs a failed
+	// one (a render that kept its pods off every node), and holding it
+	// for that component would keep the cluster broken for good.
 	f := in.facts(c, "")
 	f.Mode, f.DeprecationsScanned, f.DeprecationsTarget, f.RemovedInUse = upgrade.Automatic, true, "", 0
+	f.PlatformReady, f.TenantNotReady = true, false
 	window := convert.ClusterSpecFromAPI(c.Spec, "", nil).GetMaintenanceWindow()
 	f.WindowOpen, f.NextOpen = maintenance.Open(window, in.now), maintenance.Next(window, in.now)
 	for _, g := range upgrade.Check(f) {

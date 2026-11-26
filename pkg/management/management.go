@@ -20,12 +20,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"github.com/yindia/cluster-vending/pkg/config"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/cloudstore"
 	"github.com/yindia/cluster-vending/pkg/database/repository"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/telemetry"
 )
 
 // kindsTimeout bounds the wait for the providers' CRDs on a fresh
@@ -135,8 +137,13 @@ func ConnectStore(ctx context.Context, o Options) (repository.Store, error) {
 	if err := kube.WaitForKinds(ctx, mapper, cloudstore.Kinds(), kindsTimeout); err != nil {
 		return nil, err
 	}
-	return cloudstore.New(direct), nil
+	return cloudstore.New(storeMetrics.Wrap(direct)), nil
 }
+
+// storeMetrics measure the store's calls (cluster_vending_store_*), in the
+// process's metrics registry: the API server's /metrics and the
+// controller's --metrics-addr.
+var storeMetrics = telemetry.NewStore(ctrlmetrics.Registry)
 
 // CachedObjects are the kinds the informer cache holds: the managed
 // resources and Usages of networks and clusters, the accounts'

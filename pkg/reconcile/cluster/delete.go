@@ -28,7 +28,9 @@ import (
 // driveDelete moves a DELETING cluster on, in the reverse of its creation
 // (delete_stage.go): the workload cluster's load balancers; the tenant's
 // components; the platform's components above sequence 0, highest sequence
-// first; Karpenter's node groups; Karpenter; the EKS add-ons; then the
+// first; Karpenter's node groups; Karpenter (its chart, the cloud sweep of
+// what the cluster's controllers left in the account, its IAM); the EKS
+// add-ons; then the
 // rest, which the Usages rendered with the objects order (see
 // crossplaneaws.ClusterResources: the webhook holds each object until what
 // uses it is gone and replays its deletion then): the default node group,
@@ -93,9 +95,15 @@ func (s *Reconciler) driveDelete(ctx context.Context, row *model.Cluster) (bool,
 	if !s.deleteNodeGroups(ctx, row, cl, skip == "") {
 		return false, nil
 	}
-	// 5. Karpenter: its chart and IAM, then its queue, rules and node role.
+	// 5. Karpenter: its chart and IAM; then the cloud sweep (what the
+	// cluster's controllers left in the account, by its tags: always, also
+	// when the node or load balancer stages were skipped or timed out);
+	// then its queue, rules and node role.
 	if gone, err := s.removeKarpenterChart(ctx, row, plat); err != nil || !gone {
 		return false, err
+	}
+	if !s.sweepCloud(ctx, row, records) {
+		return false, nil
 	}
 	s.releaseNodeProfiles(ctx, row, cl)
 	if gone, err := s.removeStage(ctx, cl, crossplaneaws.DeleteStageKarpenter, stageKarpenter,

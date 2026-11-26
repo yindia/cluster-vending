@@ -98,6 +98,9 @@ const (
 	SinceResultsBuckets = 1
 	// SinceInstanceProfileCleanup: Karpenter's instance profile cleanup.
 	SinceInstanceProfileCleanup = 1
+	// SinceCloudSweep: the deletion's sweep of Karpenter's instances and the
+	// load balancer controller's load balancers and target groups.
+	SinceCloudSweep = 2
 )
 
 // capabilityNeeds is what a refused capability needs a newer template for.

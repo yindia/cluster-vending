@@ -66,4 +66,14 @@ func TestLiveSettings(t *testing.T) {
 	if _, err := config.LoadLive(nil, lookup(map[string]string{config.EnvLiveAddr: "nope"}), nil); err == nil {
 		t.Fatal("a bad address is refused")
 	}
+	if live.MetricsAddr != "" {
+		t.Fatalf("metrics listener on by default: %q", live.MetricsAddr)
+	}
+	live, err = config.LoadLive(nil, lookup(nil), write(t, "live:\n  metricsAddr: :8091\n"))
+	if err != nil || live.MetricsAddr != ":8091" {
+		t.Fatalf("metrics address = %+v, %v", live, err)
+	}
+	if _, err := config.LoadLive(nil, lookup(map[string]string{config.EnvLiveMetricsAddr: "nope"}), nil); err == nil {
+		t.Fatal("a bad metrics address is refused")
+	}
 }

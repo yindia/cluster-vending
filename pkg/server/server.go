@@ -37,7 +37,13 @@ import (
 // request because streaming RPCs are long-lived.
 const readHeaderTimeout = 10 * time.Second
 
-var rpcMetrics = telemetry.NewRPC(ctrlmetrics.Registry)
+// The API server's metrics, served on /metrics with controller-runtime's
+// client and cache metrics (docs/architecture.md#metrics-and-alerts).
+var (
+	rpcMetrics  = telemetry.NewRPC(ctrlmetrics.Registry)
+	authMetrics = telemetry.NewAuth(ctrlmetrics.Registry)
+	liveMetrics = telemetry.NewLiveClient(ctrlmetrics.Registry)
+)
 
 // Option adjusts NewHandler.
 type Option func(*options)
@@ -57,7 +63,7 @@ func WithLive(c live.Client, allowWithoutAuth bool) Option {
 	return func(o *options) {
 		o.live = []cluster.Option{func(s *cluster.ClusterService) {
 			unauthenticated := o.auth.Mode == auth.ModeNone || o.auth.Mode == ""
-			cluster.WithLive(c, unauthenticated && !allowWithoutAuth)(s)
+			cluster.WithLive(live.Measured(c, liveMetrics), unauthenticated && !allowWithoutAuth)(s)
 		}}
 	}
 }
@@ -106,6 +112,7 @@ func NewHandler(d reconcile.Deps, ready func() bool, opts ...Option) http.Handle
 		opt(&o)
 	}
 	o.auth.Logger = d.Logger
+	o.auth.Failed = authMetrics.Failed
 	// Measure after fault translation, including refusals before the handler runs.
 	server := connect.NewServer(rpcMetrics.Interceptor, service.Faults, authn.Interceptor(o.auth))
 	cloudv1connect.RegisterClusterServiceHandler(server, cluster.NewClusterService(d, append([]cluster.Option{cluster.WithResults(o.results)}, o.live...)...))

@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/helmrel"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
@@ -58,7 +60,10 @@ func (s *Reconciler) retryRelease(ctx context.Context, row *model.Cluster, names
 	if stuckBy(d.HelmState, d.LastError) {
 		what = s.removeStuckNow(ctx, row, namespace, d, at)
 	}
-	if err := s.nudgeRelease(ctx, namespace, object, at); err != nil {
+	// A retry (or a recovery, which is one) gives the rollout a new install
+	// timeout: a timed-out component is judged again from now, not failed
+	// again at once on the old clock.
+	if err := s.nudgeRelease(ctx, namespace, object, at, rolloutRunning(d)); err != nil {
 		c.Message = fmt.Sprintf("retry: provider-helm could not be told to try again: %v", err)
 		return
 	}
@@ -94,15 +99,22 @@ func (s *Reconciler) removeStuckNow(ctx context.Context, row *model.Cluster, nam
 }
 
 // nudgeRelease annotates the component's Release object, an update
-// provider-helm reconciles at once.
-func (s *Reconciler) nudgeRelease(ctx context.Context, namespace, object string, at time.Time) error {
+// provider-helm reconciles at once; restart also removes its rollout mark
+// (helmrel.RolloutAnnotation), so the install timeout starts again.
+func (s *Reconciler) nudgeRelease(ctx context.Context, namespace, object string, at time.Time, restart bool) error {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(crossplaneaws.HelmReleaseGVK)
 	u.SetNamespace(namespace)
 	u.SetName(object)
-	patch := client.RawPatch(client.Merge.Type(), []byte(fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`,
-		AnnotationRetriedAt, at.UTC().Format(time.RFC3339))))
-	return client.IgnoreNotFound(s.deps.Kube.Patch(ctx, u, patch))
+	annotations := map[string]any{AnnotationRetriedAt: at.UTC().Format(time.RFC3339)}
+	if restart {
+		annotations[helmrel.RolloutAnnotation] = nil
+	}
+	raw, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": annotations}})
+	if err != nil {
+		return err
+	}
+	return client.IgnoreNotFound(s.deps.Kube.Patch(ctx, u, client.RawPatch(client.Merge.Type(), raw)))
 }
 
 // retryUpgrade tries the cluster's failed automatic upgrade again: its

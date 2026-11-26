@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/server/authn"
 	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/telemetry"
 )
 
 const audience = "api://cluster-vending"
@@ -352,5 +354,36 @@ func TestFailsClosedWhenTheIssuerIsDown(t *testing.T) {
 	}
 	if got := server.Call(t.Context(), "/cloud.v1.ClusterService/Nope", &connect.CallInfo{}, nil); !fault.Is(got, fault.Unauthenticated) || reached {
 		t.Errorf("a call without a token = %v, want UNAUTHENTICATED before any handler", got)
+	}
+}
+
+// Every refusal says why, for cluster_vending_auth_failures_total.
+func TestRefusalsAreCountedByReason(t *testing.T) {
+	var reasons []string
+	failed := func(reason string) { reasons = append(reasons, reason) }
+	call := func(verifier authn.Verifier, header string) {
+		server := connect.NewServer(authn.Interceptor(authn.Options{Mode: auth.ModeRequired, Verifier: verifier, Failed: failed}))
+		server.SetUnknownHandler(func(context.Context, connect.Spec, connect.ServerStream) error { return nil })
+		info := &connect.CallInfo{}
+		if header != "" {
+			info.RequestHeader().Set("Authorization", header)
+		}
+		_ = server.Call(t.Context(), "/cloud.v1.ClusterService/Nope", info, nil)
+	}
+	a := newAPI(t, auth.ModeRequired)
+	cfg, err := auth.Config{Mode: auth.ModeRequired,
+		Issuers: []auth.Issuer{{Name: "idp", Issuer: a.idp.URL, Audiences: []string{audience}, UsernameClaim: "name"}}}.Resolved()
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := auth.NewVerifier(cfg)
+	call(verifier, "")
+	call(verifier, "Basic dXNlcjpwYXNz")
+	call(verifier, "Bearer garbage")
+	call(unavailable{}, "Bearer some-token")
+	call(verifier, bearer(a.token(t)))
+	want := []string{telemetry.AuthMissingToken, telemetry.AuthMalformedHeader, telemetry.AuthRejected, telemetry.AuthUnavailable}
+	if !slices.Equal(reasons, want) {
+		t.Fatalf("reasons %v, want %v", reasons, want)
 	}
 }

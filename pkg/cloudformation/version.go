@@ -17,7 +17,11 @@ import "strconv"
 //
 //	1: S3 results permissions and ServerPrincipalArn, Karpenter instance
 //	   profile cleanup, the DryRun CreateTags check, the version tag.
-const TemplateVersion = 1
+//	2: the deletion's cloud sweep: ec2:TerminateInstances on instances
+//	   tagged karpenter.sh/nodepool, elasticloadbalancing Describe*, and
+//	   DeleteLoadBalancer/DeleteTargetGroup on those tagged
+//	   elbv2.k8s.aws/cluster.
+const TemplateVersion = 2
 
 // ManagementTemplateVersion is the version of the management account's
 // role templates (management and server), bumped whenever one of them

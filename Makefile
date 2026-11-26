@@ -222,7 +222,9 @@ TAG      ?= $(VERSION)
 GO_IMAGE_VERSION ?= $(shell awk '$$1 == "go" { print $$2; exit }' go.mod)
 # kustomize, or the one built into kubectl.
 KUSTOMIZE ?= $(shell command -v kustomize >/dev/null 2>&1 && echo 'kustomize build' || echo 'kubectl kustomize')
-DEPLOY_DIRS := config/default config/server/base
+# The server's production overlay requires login (config/server/auth);
+# config/server/base alone runs auth mode none, for local development only.
+DEPLOY_DIRS := config/default config/server/auth
 
 .PHONY: docker-build
 docker-build: ## Build the container image IMAGE:TAG (needs Docker; nothing is pushed)
@@ -245,8 +247,9 @@ UI_IMAGE ?= ghcr.io/yindia/cluster-vending-ui
 HELM_CHART   := charts/cluster-vending
 HELM_RELEASE ?= cluster-vending
 HELM_NAMESPACE ?= cluster-vending-system
-# lint and template need the controller's required value; a placeholder.
-HELM_LINT_SET := --set aws.managementRoleArn=arn:aws:iam::111122223333:role/crossplane-provider-aws
+# lint and template need the controller's required value (a placeholder) and
+# the API's login (ci/auth-values.yaml: the chart refuses an API without it).
+HELM_LINT_SET := --set aws.managementRoleArn=arn:aws:iam::111122223333:role/crossplane-provider-aws -f $(HELM_CHART)/ci/auth-values.yaml
 # A second kind cluster for the chart, never the development one (KIND_CLUSTER).
 HELM_KIND_CLUSTER ?= cv-helm
 
@@ -255,7 +258,7 @@ docker-build-ui: ## Build the console image UI_IMAGE:TAG from ui/ (needs Docker;
 	docker build -t $(UI_IMAGE):$(TAG) ui
 
 .PHONY: helm-sync
-helm-sync: ## Copy the RBAC of config/ into the chart (files/rbac); config/helm_chart_test.go checks the copies
+helm-sync: ## Copy the RBAC and the alerts of config/ into the chart (files/); config/helm_chart_test.go checks the copies
 	@mkdir -p $(HELM_CHART)/files/rbac
 	cp config/rbac/role.yaml config/rbac/platform_role.yaml config/rbac/kubeconfig_reader_role.yaml \
 	  config/rbac/usage_history_writer_role.yaml config/rbac/leader_election_role.yaml \
@@ -263,6 +266,12 @@ helm-sync: ## Copy the RBAC of config/ into the chart (files/rbac); config/helm_
 	  config/rbac/release_admin_role.yaml config/rbac/release_viewer_role.yaml $(HELM_CHART)/files/rbac/
 	cp config/server/base/role.yaml $(HELM_CHART)/files/rbac/server_role.yaml
 	cp config/live/role.yaml $(HELM_CHART)/files/rbac/live_role.yaml
+	sed -n '/^spec:$$/,$$p' config/prometheus/rules.yaml | tail -n +2 | sed 's/^  //' > $(HELM_CHART)/files/prometheus-rules.yaml
+
+.PHONY: prom-rules-check
+prom-rules-check: ## Check the alerts with promtool (local, or the prom/prometheus image)
+	@if command -v promtool >/dev/null; then promtool check rules $(HELM_CHART)/files/prometheus-rules.yaml; \
+	else docker run --rm -v "$(CURDIR)/$(HELM_CHART)/files:/r:ro" --entrypoint promtool prom/prometheus:v3.5.0 check rules /r/prometheus-rules.yaml; fi
 
 .PHONY: helm-lint
 helm-lint: ## Lint the chart with the defaults and with each workload turned off

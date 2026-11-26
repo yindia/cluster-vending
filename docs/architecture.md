@@ -164,8 +164,10 @@ platform's own credentials alone ([AWS access and accounts](#aws-access-and-acco
 - API authentication with OIDC bearer tokens, off by default. Authentication
   only: there are no roles, and any authenticated user can act on every tenant.
   The CLI has `login`, `logout` and `whoami`.
-- Prometheus metrics on both processes (RPC metrics on the API; fleet, freeze
-  and reconcile metrics on the controller).
+- Prometheus metrics on all three processes (RPC, auth, store and live-read
+  metrics on the API; fleet, rollout, transition and reconcile metrics on the
+  controller; reads on the live reader), with alerts and runbooks
+  ([Metrics and alerts](#metrics-and-alerts)).
 
 ## 3. How it works
 
@@ -219,7 +221,7 @@ Each layer has one job. The import rules were checked with `go list -deps`.
 | `pkg/reconcile/network`, `cluster`, `account`, `deprecations`, `recommendations` | A reconciler for each kind. They are the only code that looks at AWS, besides the access and results readers. | As `pkg/reconcile`. |
 | `pkg/management` | Prepares the management cluster for the two commands: the manager, the store, and (for the controller) the providers, CRDs and AWS lookups. | No RPC library. |
 | `pkg/server/*` | The RPC handlers: validate, read and write rows, map errors to Connect codes. They make no AWS call except reading results. | Everything above. |
-| `pkg/auth`, `pkg/server/authn` | Who calls the API: the `auth` settings, OIDC token verification, and the audit log of writes. No authorization. | No storage. |
+| `pkg/auth`, `pkg/server/authn` | Who calls the API: the `auth` settings, OIDC token verification, and the audit log of writes and sensitive reads. No authorization. | No storage. |
 | `pkg/database/repository`, `pkg/database/cloudstore`, `pkg/database/model` | The storage interface, its one implementation on the custom resources, and the row types. | `repository` and `model` import nothing else from the repository. |
 | `pkg/controller/*`, `pkg/convert`, `pkg/owner`, `api/v1alpha1` | The custom resource types, the controllers, the manager, owner references, and the conversion between the typed spec and the contract. | Types import nothing from `pkg/`. |
 | `pkg/results`, `pkg/reconcile/resultsink` | Writes and reads a cluster's results objects in S3, with bounds and ETags. | The S3 client only. |
@@ -491,6 +493,44 @@ stage and what it waits for.
    deleted, through the tenant role. A forced or timed-out node group stage
    leaves them, and IAM refuses to delete a role a profile still holds. No
    other profile is touched.
+
+   Between the chart and the node role runs the **cloud sweep**
+   (`pkg/reconcile/cluster/delete_cloud_sweep.go`, `awscloud.SweepCluster`):
+   with the tenant role, in the cluster's region, it finds by the cluster's
+   tags what its controllers made and the workload stages did not delete,
+   and deletes it:
+
+   | What | Found by | Done |
+   |---|---|---|
+   | Karpenter's EC2 instances | `karpenter.sh/nodepool` (any value) and `kubernetes.io/cluster/<eks name>=owned` | terminated, then waited for until EC2 says terminated |
+   | Karpenter's launch templates | `karpenter.k8s.aws/cluster=<eks name>` | deleted |
+   | The AWS Load Balancer Controller's load balancers (ELBv2) | `elbv2.k8s.aws/cluster=<eks name>` | deleted |
+   | Its target groups | `elbv2.k8s.aws/cluster=<eks name>` | deleted once no load balancer of the cluster is left |
+   | Its security groups | `elbv2.k8s.aws/cluster=<eks name>` | deleted after that; `DependencyViolation` (the load balancer's interfaces linger a few minutes) is retried |
+
+   It runs for every deletion whose EKS cluster the platform deletes, also a
+   forced one and after stage 1 or 4 timed out or was skipped; an imported
+   cluster whose EKS cluster is only observed or retained is skipped
+   (`CloudSweepSkipped`). Nothing without those tags is touched (a managed
+   node group's instances have no `karpenter.sh/nodepool`). Each pass is
+   bounded (ten pages per call, one minute); its state is `status.cloudSweep`
+   (start, result, and the IDs still there in `waiting`). It ends with
+   `CloudSweepFinished`, or after `--teardown-timeout` from its own start with
+   a `CloudSweepTimedOut` warning naming what is left by ID, and the deletion
+   goes on. AWS errors are the stage's message and retried; an account whose
+   role template is older than version 2 is told to update its stack.
+
+   The sweep needs, in the provisioner role (template version 2):
+   `ec2:DescribeInstances` (the reader's `ec2:Describe*`),
+   `ec2:TerminateInstances` on instances tagged `karpenter.sh/nodepool`,
+   `ec2:DeleteLaunchTemplate` and `ec2:DeleteSecurityGroup` (already in
+   `ProvisionNetwork`), `elasticloadbalancing:DescribeLoadBalancers`,
+   `DescribeTargetGroups` and `DescribeTags`, and
+   `elasticloadbalancing:DeleteLoadBalancer` and `DeleteTargetGroup` on
+   resources tagged `elbv2.k8s.aws/cluster`. Accounts created from an older
+   template need `aws cloudformation update-stack` with the template the API
+   server serves (`account create` prints the command when the stack is
+   outdated).
 6. **EKS add-ons** with their pod identity associations, roles and policies.
 7. **The rest**, ordered by Usages: the default managed node group, the EKS
    cluster, the cluster's IAM, the results bucket (emptied first, every pass
@@ -506,7 +546,10 @@ Rules that apply throughout:
   pause set by an operator or a freeze is not lifted, and the stage waits and says so.
 - The load balancer stage ends after `--teardown-timeout` (default 15 m), and
   the node group stage after the same time from the request. Each ends with a
-  `TeardownTimedOut` warning naming what is left, and the deletion goes on.
+  `TeardownTimedOut` warning naming what is left, and the deletion goes on;
+  the cloud sweep then deletes what they left in the account. The node group
+  stage's clock for an API that does not answer is kept in
+  `status.nodeTeardown`, so a controller restart does not start it again.
 - Whether the workload cluster is used is decided by trying, not by the EKS
   status alone: with a kubeconfig Secret and an EKS cluster that is `ACTIVE` or
   `UPDATING` (an upgrade), the API is called, and stages 1 and 4 retry a failing
@@ -674,7 +717,14 @@ controller manages it around that
   annotation, `<digest>/<revision>/<since>`). A release that is not Ready within
   it failed: `Failed`, "rollout timed out after 10m0s waiting for deployment/X",
   a counted release error that goes into the backoff below, as a failed Helm
-  wait did. There is no automatic rollback: a failed upgrade stays `Failed`
+  wait did. It counts only time the workloads were read and found
+  unavailable: while the workload API cannot be read the release is
+  `Installing` with the read error ("waiting for the workloads of chart X to be
+  read (...)"), transient and never counted, and a timeout already running
+  starts again once the workloads are read. Each new attempt gets a full
+  timeout: a `cluster retry`, an automatic recovery (release move, catalog
+  change) and the end of a backoff pause remove the release's rollout mark, so
+  the clock restarts from the next read. There is no automatic rollback: a failed upgrade stays `Failed`
   with its message until it rolls out (it is then Ready again), a new digest
   replaces it, or a person retries.
 - **Order and one at a time.** A new release waits until the releases it
@@ -727,8 +777,10 @@ sample) is changed by whoever applied it.
 
 ### Node layout
 
-A cluster has exactly two node groups, both the platform's, from its config
-(`nodeGroups`); tenants define none:
+The platform runs two node groups in a cluster, both its own, from its config
+(`nodeGroups`); the API defines no others. Tenants make their own Karpenter
+pools in the cluster (see "Tenant pools" below), which the platform does not
+manage:
 
 | Pool | Label | Taint | Runs |
 |---|---|---|---|
@@ -833,15 +885,41 @@ is refused (`INVALID_ARGUMENT`), JSON drops them, and an `update_mask` path
 under `spec.default_node_pool`, `spec.aws.default_node_pool` or
 `spec.node_groups` is refused (`INVALID_ARGUMENT`). A stored cluster that still
 has them is read without them and never renders them. The
-controller deletes the `NodePool` and `EC2NodeClass` objects it applied
-(`cloud.cluster-vending.io/managed-by=platform`) that it no longer renders,
-every one but `platform-pool` (`removeNodeGroups`): a pool before its class,
-the class once the pool is gone; Karpenter drains and terminates their nodes.
-Such a group is listed in `status.nodeGroups` as `Deleting`, with a message,
-until it is gone. A system group a tenant setting had changed (instance types,
+`NodePool` and `EC2NodeClass` objects an earlier build applied for them
+(`cloud.cluster-vending.io/managed-by=platform`, any name but `platform-pool`
+and the old `platform`) are handed over, not deleted (`removeNodeGroups`,
+`handOverPools`): the controller removes its label once, so it never lists,
+changes or deletes them again, and emits one `NodePoolsHandedOver` event naming
+them. Nothing is drained: their nodes and pods stay, and they are tenant pools
+from then on. A system group a tenant setting had changed (instance types,
 a launch template) is replaced by the platform's like any other change of
 `nodeGroups.system`. A cluster built before the system group existed has an
-old `platform` pool, removed once its components have moved off it.
+old `platform` pool, the platform's own: it is deleted once its components
+have moved off it (its pool first, its class once its nodes are gone).
+
+**Tenant pools.** A tenant makes its own `NodePool` and `EC2NodeClass` in its
+cluster with kubectl; `examples/tenant-nodepool.yaml` is a minimal one (the
+platform does not apply it). Its class names Karpenter's node role in
+`spec.role`: `status.aws.karpenterNodeRole` (and `karpenterNodeRoleArn`) in
+`cluster get`, `<prefix>-karpenter-node`. Karpenter makes the instance profile
+from it; its controller policy (the upstream v1.15 policy,
+`pkg/catalog/definitions/karpenter.yaml`) creates, tags and deletes instance
+profiles for any `EC2NodeClass` of the cluster, launches instances for any
+`NodePool`, and passes only that role to EC2, so a class naming another role
+or a ready-made instance profile is denied. Subnets are selected by
+`karpenter.sh/discovery: <cluster name>` (or `kubernetes.io/cluster/<cluster
+name>: "*"` when another cluster of the network holds the discovery tag; the
+platform pool's class shows which), the security group by EKS's
+`aws:eks:cluster-name: <cluster name>`. Nodes join through the role's
+`EC2_LINUX` access entry. The platform never lists, changes or deletes a
+tenant pool while the cluster lives (it acts only on objects with its label),
+and an upgrade does not wait for one: the node groups step counts only the
+platform's pools (`platform-pool`, and the old `platform` while it exists);
+tenant pools whose nodes run another kubelet minor are listed as a warning in
+`status.upgrade.tenantPoolsBehind` ("gpu (1.36)"), the tenant's to roll. A
+cluster's deletion deletes every `NodePool`, `NodeClaim` and `EC2NodeClass`,
+the tenant's included, in its node groups stage: nothing Karpenter launched
+outlives the cluster.
 
 **Imported clusters.** An imported cluster keeps the node group it adopted,
 read-only: its settings as the import found them are kept in the cluster's
@@ -860,7 +938,8 @@ fails the build when the shipped requests exceed 85 % of the default group's
 allocatable CPU or memory, or its pod capacity.
 
 **Status.** `status.nodeGroups` lists the system group first, then the platform
-pool, then any removed tenant group while it drains: phase (`Pending`, `Ready`, `Failed`, `Deleting`), node counts, and a
+pool (a status an earlier build recorded for a removed tenant group is kept
+only until the next pass reaches the cluster): phase (`Pending`, `Ready`, `Failed`, `Deleting`), node counts, and a
 message. Node lists are kept in the results bucket (the `nodes` kind, sharded by
 group). Reads and applies to a workload cluster are bounded: 500 items a list, 10 s
 a call, 45 s a pass, and they never fail the cluster's own pass.
@@ -964,7 +1043,10 @@ AWS and Helm report it settled (`status.upgrade.phase`, with `phaseStartTime`):
 2. `NodeGroups` (and `NodesAndAddons` while both move): the node groups move to
    the new minor. The Karpenter classes' AMI pin moves to the release's
    `nodeAmiPin`, and drift replaces the nodes. The step is settled when every
-   node runs the target kubelet minor.
+   node of the platform's groups (the system group, `platform-pool`, the old
+   `platform` while it exists) runs the target kubelet minor and none of their
+   NodeClaims is still launching. Tenant pools are not waited for:
+   `tenantPoolsBehind` lists the ones on another minor.
 3. `Addons`: the add-ons take the versions EKS recommends for the new minor, read
    from AWS (`DescribeAddonVersions`), never from `release.yaml`. A pinned add-on
    keeps its pin.
@@ -1260,24 +1342,35 @@ The API server authenticates its callers with OIDC bearer tokens. It is
 **authentication only**: there are no roles, rules or grants. Any user whose token
 is accepted can call every RPC, `AdminService` included, for every tenant: read,
 change and delete any tenant's networks and clusters, create tenants, and freeze the
-platform. It is off by default: without an `auth` section in the settings file,
-every caller is anonymous and has the same full access.
+platform. Without an `auth` section in the settings file the server runs mode `none`,
+where every caller is anonymous and has the same full access. The deployments do
+not allow that: the Helm chart refuses to render without `auth.mode: required`
+(unless the local/dev flag `allowInsecureNoAuth`), and `config/server/auth` is the
+kustomize overlay to deploy.
 
 **Modes** (`auth.mode`):
 
 | Mode | A request without a token | A request with a token |
 |---|---|---|
-| `none` (default) | Served. The caller is anonymous. For local development only; the server logs a warning at start. | Served; the token is not checked. |
+| `none` (default of the binary) | Served. The caller is anonymous and audited as `anonymous`. For local development only: the server logs a warning at start, an `INSECURE` one when it listens on an address other than loopback (`:8080`, a pod IP). It still starts. | Served; the token is not checked. |
 | `required` | `UNAUTHENTICATED` (HTTP 401, `WWW-Authenticate: Bearer`). | The token must verify: signature (RS256 or ES256, from the issuer's keys), issuer, one accepted audience and expiry. Otherwise `UNAUTHENTICATED`. |
 
 `optional` is removed: a file that sets it stops the server at start, with a message
 to set `required` (or `none` locally). `/healthz`, `/readyz` and `/metrics` are not
 RPCs and are never authenticated.
 
-`config/server/base` deploys the API with mode `none`: it accepts anonymous callers
-for every tenant, so the Service must be restricted. `config/server/auth` is an opt-in
-deployable example that requires tokens, with the issuer and audience to edit before
-use. It holds public verification settings only.
+`config/server/auth` is the overlay to deploy (`make deploy-manifests` renders it): it
+requires tokens, with the issuer and audience to edit before use, and holds public
+verification settings only. `config/server/base` alone runs mode `none` and is for
+local development only: any pod that reaches its Service could freeze the platform or
+delete any tenant's clusters.
+
+**Helm.** With `server.enabled`, the chart fails unless `platform.auth.mode` is
+`required`; with `ui.ingress.enabled`, it fails unless `ui.auth.enabled`. The value
+`allowInsecureNoAuth: true` lifts both, for local/dev clusters only
+(`ci/kind-values.yaml`); NOTES.txt then prints a warning. `networkPolicy.server` is on
+by default: only the console's pods and `networkPolicy.server.from` reach the API
+(`kubectl port-forward` is not affected).
 
 **Issuers** (`auth.issuers`): `name`, `issuer` (the `iss` of the tokens; `https`, or
 `http` for `localhost` only), `audiences` (at least one must be in the token's `aud`),
@@ -1288,9 +1381,13 @@ use. It holds public verification settings only.
 **Removed keys.** `auth.rules`, and `rolesClaim` and `tenantClaim` on an issuer, were
 the roles. A file that still has them loads; each is ignored with one warning at start.
 
-**Audit.** Every write (an RPC not marked `NO_SIDE_EFFECTS`) and every refused call is
-logged with the caller's subject, username, issuer, the request's tenant and the
-outcome. A token is never logged. `WhoAmI` returns the caller's subject, username and
+**Audit.** In both modes, every write (an RPC not marked `NO_SIDE_EFFECTS`) is logged
+(`api write`), and so are the sensitive reads (`api sensitive read`):
+`GetAccountOnboarding` (the accounts' external IDs) and the live reads
+`ListNodeGroupNodes` and `GetNodeResources`. Each line has the procedure, the caller's
+subject (`anonymous` in mode `none`), username, issuer, the request's tenant, the
+outcome and the caller's address (`peer`). Every refused call is logged
+(`api call refused`) with its procedure and address. A token is never logged. `WhoAmI` returns the caller's subject, username and
 issuer.
 
 **Microsoft Entra ID.** Two app registrations, one for the API and one for the CLI.
@@ -1514,8 +1611,8 @@ are marked so in the type; the rest can be updated.
 | `status.endpoint` | `{url, certificateAuthorityData}` | The API endpoint, once the control plane is ready. |
 | `status.kubeconfigSecret` | string | The Secret in this namespace with the key `kubeconfig`. |
 | `status.currentKubernetesVersion` | string | The version the control plane runs. |
-| `status.aws` | object | `clusterARN`, `clusterSecurityGroupID`, `platformVersion`, `nodeGroupARN`, `addons[]` (name, version, ready, message). |
-| `status.upgrade` | object | The Kubernetes upgrade in progress: `fromVersion`, `toVersion`, `phase` (`ControlPlane`, `NodesAndAddons`, `NodeGroups`, `Addons`, `PlatformComponents`, `TenantComponents`), `startTime`, `phaseStartTime`, `message`, `nodeGroups[]`, `addonsBehind`, `componentsBehind`, `recoveries`, `halted`, `skippedSteps`. |
+| `status.aws` | object | `clusterARN`, `clusterSecurityGroupID`, `platformVersion`, `nodeGroupARN`, `karpenterNodeRole` and `karpenterNodeRoleARN` (the role a tenant's `EC2NodeClass` names, [Node layout](#node-layout)), `addons[]` (name, version, ready, message). |
+| `status.upgrade` | object | The Kubernetes upgrade in progress: `fromVersion`, `toVersion`, `phase` (`ControlPlane`, `NodesAndAddons`, `NodeGroups`, `Addons`, `PlatformComponents`, `TenantComponents`), `startTime`, `phaseStartTime`, `message`, `nodeGroups[]`, `addonsBehind`, `componentsBehind`, `recoveries`, `halted`, `skippedSteps`, `tenantPoolsBehind` (a warning: tenant pools on another kubelet minor, never waited for). |
 | `status.rollout` | object | The cluster's last automatic upgrade: `channel`, `fromVersion`, `toVersion`, `startTime`, `finishTime`, `result` (`Pending`, `Blocked`, `InProgress`, `Succeeded`, `Failed`, `TimedOut`), `message`, `tier`. |
 | `status.releaseMove` | object | The component move to the channel's release: `current`, `target`, `phase` (`Idle`, `Pending`, `Components`, `Halted`), `component`, `step`, `steps`, `message`. |
 | `status.kubernetes` | object | `channel`, `channelMinor`, `available` (the next minor), `ending`, `message`. |
@@ -1523,7 +1620,7 @@ are marked so in the type; the rest can be updated.
 | `status.platformComponents` | list | Per platform component: `name`, `version`, `phase` (`Pending`, `Installing`, `Ready`, `Failed`), `message`, `chart`, `helmState`, `lastError`, `failures`, `since`, `recoveries`, `chartVersion`, `revision`, `digest`, `attempts`, `countedFailures`, `nextRetryAt`, `lastErrorClass` (`transient`, `chart`, `release`), `lastRecovery`, `unchanged`. |
 | `status.platformRelease` | string | The release the platform components' versions come from. |
 | `status.componentInventory` | list | The Crossplane objects of the platform components (IAM roles, Helm releases). |
-| `status.nodeGroups` | list | The system group, then the platform pool, then a removed tenant group while it drains (`Deleting`): `name`, `platformManaged`, `phase`, `message`, `nodes`, `nodesNotice`. |
+| `status.nodeGroups` | list | The system group, then the platform pool: `name`, `platformManaged`, `phase`, `message`, `nodes`, `nodesNotice`. Tenant pools are not listed. |
 | `status.deprecations` | object | The last deprecation scan's summary (target, times, counts, error). |
 | `status.recommendations` | object | The last sample's summary (times, workloads, containers, `metricsAvailable`, `vpaAvailable`, error, message). |
 | `status.results` | list | One reference per result kind in S3: `kind`, `bucket`, `key`, `etag`, `digest`, `collectedAt`, `attemptedAt`, `total`, `removed`, `incomplete`, `truncated`. |
@@ -1977,11 +2074,23 @@ workload on or off from one values file: the API server, the controller, the liv
 reader and the console. Crossplane must be installed first (as `hack/start.sh` does).
 
 ```sh
+# my-auth-values.yaml: platform.auth (mode: required, your issuers), as
+# charts/cluster-vending/ci/auth-values.yaml. The chart refuses an API without it.
 helm install cluster-vending charts/cluster-vending \
   -n cluster-vending-system --create-namespace \
+  -f my-auth-values.yaml \
   --set aws.managementRoleArn=arn:aws:iam::111122223333:role/crossplane-provider-aws \
   --set controller.serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::111122223333:role/crossplane-provider-aws
 ```
+
+- **Login.** The render fails without `platform.auth.mode: required` (with
+  `server.enabled`), and when `ui.ingress.enabled` is set without `ui.auth.enabled`.
+  `allowInsecureNoAuth: true` lifts both, on local/dev clusters only
+  (`ci/kind-values.yaml`), and NOTES.txt warns. See [Authentication](#authentication).
+- **Network policies.** `networkPolicy.server` is on by default: the API accepts the
+  console's pods and `networkPolicy.server.from` only (add an ingress controller,
+  in-cluster CLI users, Prometheus scraping `/metrics`). A `kubectl port-forward`
+  enters the pod's network namespace and is not blocked.
 
 - **Settings.** The `platform` value is the shared settings file: one ConfigMap,
   mounted at `/etc/cluster-vending/platform.yaml` into the server and the controller,
@@ -1997,7 +2106,8 @@ helm install cluster-vending charts/cluster-vending \
   server gets no workload-cluster credentials. The RBAC rules are copies of
   `config/` (`make helm-sync`), and `config/helm_chart_test.go` fails when they drift.
 - **Live reader.** One replica, strategy `Recreate`, reachable from the API server's
-  pods only (`networkPolicy.live`, on by default).
+  pods only (`networkPolicy.live`, on by default); its metrics-only port (8091) from
+  `networkPolicy.metricsFrom`.
 - **Console.** The browser calls only the console's origin (`/api/rpc/...`). The
   console's server side forwards each call to the API's Service (`CV_API_BASE_URL`).
   One port-forward is enough:
@@ -2063,6 +2173,7 @@ list is in `pkg/reconcile/events.go`):
 | Cluster | `AutomaticUpgradeStarted`, `AutomaticUpgradeSucceeded`, `AutomaticUpgradeFailed` | Normal, Normal, Warning | The rollout set a version, it finished, or it failed or stalled. |
 | Cluster | `PlatformComponentInstalling`, `PlatformComponentReady`, `PlatformComponentFailed`, `PlatformComponentRemoved`, `PlatformComponentsReady` | Normal, Warning for failed | Platform component states. |
 | Cluster | `StuckReleaseRecovered`, `RecoveryLimitReached`, `HelmReleaseFailed` | Warning | Helm recovery and giving up. |
+| Cluster | `NodePoolsHandedOver` | Normal | Karpenter pools an earlier build made for the tenant are the tenant's now. |
 | Cluster | `ComponentRetried`, `UpgradeRetried` | Normal | `cluster retry`. |
 | Cluster | `ReleaseMoveStarted`, `ComponentUpgraded`, `ReleaseMoveRecovering`, `ReleaseMoveHalted`, `ReleaseMoveFinished` | Normal, Warning for recovery and halt | The component move to a release. |
 | Cluster | `TeardownStarted`, `TeardownFinished`, `TeardownTimedOut`, `TeardownSkipped` | Normal, Warning | The deletion's first stage. |
@@ -2076,27 +2187,265 @@ the frozen objects; `DeletionBlocked` (with the dependents named); `AccessVerifi
 on an account; `PlatformComponentsReady`, `UpgradePaused` and `SpecEditIgnored`
 on a cluster; `DeprecationScan` for scans; and `Offering` on a channel.
 
-### Metrics
+### Metrics and alerts
 
-The API server serves `/metrics` on its HTTP listener, without authentication. The
-controller serves it when `--metrics-addr` is set. Both are plain HTTP, to scrape
-through the management network.
+Every process serves Prometheus metrics as plain HTTP, without authentication, to
+scrape through the management network:
 
-| Metric | Type | Meaning |
+| Process | Where | Registry |
 |---|---|---|
-| `cluster_vending_rpc_requests_total` | Counter | Completed calls, by `rpc_service`, `rpc_method`, `rpc_type`, `code`. |
-| `cluster_vending_rpc_duration_seconds` | Histogram | Lifetime of a call. |
-| `cluster_vending_rpc_in_flight` | Gauge | Calls executing now. |
-| `cluster_vending_fleet_resources` | Gauge | Accounts, networks, clusters and tenant components by phase (`kind`, `phase`). |
-| `cluster_vending_fleet_conditions` | Gauge | Ready and Synced counts by `kind`, `condition`, `status`. |
-| `cluster_vending_fleet_upgrade_clusters`, `cluster_vending_fleet_release_moves`, `cluster_vending_fleet_code_changes` | Gauge | Upgrades, component moves and code changes in progress, by phase. Code changes by kind: `cluster`, `network`, `catalog`. |
-| `cluster_vending_fleet_components` | Gauge | Platform and tenant component instances by phase. |
-| `cluster_vending_fleet_frozen_resources`, `cluster_vending_freeze_phase`, `cluster_vending_freeze_resources` | Gauge | Frozen owners, and the freeze's phase and paused resources. |
-| `cluster_vending_fleet_metrics_active`, `cluster_vending_fleet_metrics_last_success_timestamp_seconds`, `cluster_vending_fleet_metrics_refresh_errors_total` | Gauge, Counter | Only the elected leader publishes fleet snapshots; standbys publish 0. |
+| API server | `/metrics` on its HTTP listener (`--http-addr`, 8080) | controller-runtime's (`client-go` and cache metrics too) |
+| controller | `/metrics` on `--metrics-addr` (command default `0`, off; the chart and `config/default` set `:8080`) | controller-runtime's (`controller_runtime_*`, `workqueue_*`, `rest_client_*`) |
+| live reader | `/metrics` on `--live-addr` (8090), and on `--live-metricsAddr` (8091 in the chart and `config/live`), a listener that serves only `/metrics` and the probes | its own |
 
-Fleet metrics come from one leader's refresh every 30 s. A stale refresh is visible in
-`fleet_metrics_last_success_timestamp_seconds`. The controller's own
-`controller_runtime_*` metrics are also served.
+No label carries a request ID, an error message, a user, a value or a tenant or
+cluster name: labels come from fixed vocabularies (phases, codes, kinds, channels,
+tiers) or from bounded sets checked when the series is made (catalog components,
+Kubernetes minors, managed resource kinds, gate codes, event reasons). A value
+outside the set, or past its bound, is `other`.
+
+**API server.**
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `cluster_vending_rpc_requests_total` | Counter | `rpc_service`, `rpc_method`, `rpc_type`, `code` | Completed calls, including refused ones; unknown procedures are `unknown`. |
+| `cluster_vending_rpc_duration_seconds` | Histogram | `rpc_service`, `rpc_method`, `rpc_type` | Lifetime of a call (a stream's whole life). |
+| `cluster_vending_rpc_in_flight` | Gauge | `rpc_service`, `rpc_method`, `rpc_type` | Calls executing now. |
+| `cluster_vending_auth_failures_total` | Counter | `reason` | Calls refused by authentication: `missing_token`, `malformed_header`, `rejected` (signature, issuer, audience, expiry), `issuer_unavailable`. |
+| `cluster_vending_store_requests_total` | Counter | `operation`, `kind`, `outcome` | The store's calls to the Kubernetes API (the platform's custom resources): `get`, `list`, `create`, `update`, `patch`, `delete`, `update_status`, `patch_status`; outcome `ok`, `not_found`, `conflict`, `already_exists`, `invalid`, `forbidden`, `timeout`, `error`. The controller's store has them too. |
+| `cluster_vending_store_request_duration_seconds` | Histogram | `operation`, `kind` | Their duration. |
+| `cluster_vending_live_client_requests_total` | Counter | `method`, `outcome` | Calls to the live reader: `ok`, `timeout`, `unreachable`, or the reader's own code (`unavailable`, `resource_exhausted`, ...). |
+| `cluster_vending_live_client_request_duration_seconds` | Histogram | `method` | Their duration. |
+| `cluster_vending_live_client_in_flight` | Gauge | | Live calls executing now. |
+
+**Controller: the fleet.** One collector refreshes a snapshot of the informer cache
+every 30 s on the elected leader (no API call on a scrape; standbys publish only the
+refresh health). A failed refresh keeps the previous snapshot.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `cluster_vending_fleet_resources` | Gauge | `kind`, `phase` | Accounts, networks, clusters and tenant components by phase. |
+| `cluster_vending_fleet_conditions` | Gauge | `kind`, `condition`, `status` | `ready` and `synced` on every kind, `reachable` on clusters, `accessverified` on accounts. |
+| `cluster_vending_fleet_cluster_configuration` | Gauge | `channel`, `tier`, `mode` | Clusters by channel, tier and upgrade mode. |
+| `cluster_vending_fleet_clusters_by_version` | Gauge | `minor`, `channel` | Clusters by the Kubernetes minor they run. |
+| `cluster_vending_fleet_clusters_extended_support` | Gauge | `minor` | Clusters on a minor no channel offers (extended support, Manual upgrades only). |
+| `cluster_vending_fleet_generation_pending` | Gauge | `kind` | Owners whose status has not observed the latest generation. |
+| `cluster_vending_fleet_oldest_provisioning_seconds` | Gauge | `kind` | Age of the oldest owner still provisioning. |
+| `cluster_vending_fleet_deletions` | Gauge | `kind`, `stage` | Owners being deleted; a cluster's stage is `teardown` (its load balancers and nodes) or `resources`. |
+| `cluster_vending_fleet_oldest_deleting_seconds` | Gauge | `kind` | Time since the deletion request of the oldest owner still deleting. |
+| `cluster_vending_fleet_frozen_resources` | Gauge | `kind` | Owners whose `Frozen` condition is true. |
+| `cluster_vending_fleet_inventory_resources` | Gauge | `owner_kind` | Recorded inventory references. |
+| `cluster_vending_fleet_managed_resources_not_ready` | Gauge | `owner_kind`, `kind`, `state` | Crossplane managed resources of networks and clusters not READY (`creating`, `waiting`, `failed`, `deleting`, `missing`, `updating`), by resource kind. |
+| `cluster_vending_fleet_upgrade_clusters` | Gauge | `channel`, `tier`, `phase` | Kubernetes upgrades in progress by step. |
+| `cluster_vending_fleet_upgrade_oldest_phase_seconds` | Gauge | `phase` | Longest time in the current upgrade step. |
+| `cluster_vending_fleet_upgrade_halted` | Gauge | `channel` | Upgrades halted (add-ons did not settle after the recoveries). |
+| `cluster_vending_fleet_addons_behind` | Gauge | | Add-ons not on their new version during upgrades. |
+| `cluster_vending_fleet_components` | Gauge | `scope`, `phase` | Platform and tenant component instances by phase. |
+| `cluster_vending_fleet_component_phases` | Gauge | `scope`, `component`, `phase` | The same by catalog component (a name the catalog does not define is `other`). |
+| `cluster_vending_fleet_component_oldest_not_ready_seconds` | Gauge | `scope`, `component` | Longest time an instance has not been Ready. |
+| `cluster_vending_fleet_helm_releases` | Gauge | `state` | Platform component Helm Releases: `deployed`, `backoff` (paused by the platform's backoff), `gave_up`, `stuck` (pending-* or uninstalling), `failed`, `other`. |
+| `cluster_vending_fleet_release_moves`, `cluster_vending_fleet_code_changes` | Gauge | `phase`; `kind`, `phase` | Component moves to a release, and code changes (`cluster`, `network`, `catalog`) by phase. |
+| `cluster_vending_rollout_clusters` | Gauge | `channel`, `rollout`, `tier`, `state` | A channel's rollouts (`kubernetes`, `release`, `code`): clusters `pending`, `in_progress`, `succeeded`, `failed`, `blocked` per tier. |
+| `cluster_vending_rollout_halted` | Gauge | `channel`, `rollout` | 1 when the rollout is halted. |
+| `cluster_vending_rollout_current_tier` | Gauge | `channel`, `rollout`, `tier` | 1 for the tier the rollout is at. |
+| `cluster_vending_rollout_blocked_clusters` | Gauge | `channel`, `gate` | Clusters the Kubernetes rollout passes over, by first gate code (of the at most 20 the channel lists). |
+| `cluster_vending_fleet_scan_oldest_attempt_seconds` | Gauge | `kind` | Longest time since a running cluster was scanned or sampled: `deprecations`, `recommendations`, `policy` (never: since its creation). |
+| `cluster_vending_freeze_policy_present`, `cluster_vending_freeze_phase`, `cluster_vending_freeze_resources` | Gauge | `phase`; `state` | The platform freeze: present, its confirmation phase, matched and paused resources. |
+| `cluster_vending_fleet_metrics_active`, `..._refresh_success`, `..._last_success_timestamp_seconds`, `..._refresh_duration_seconds`, `..._refresh_errors_total` | Gauge, Counter | | The snapshot's health. |
+
+**Controller: transitions.** Counted and timed where the reconcilers make them.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `cluster_vending_events_total` | Counter | `kind`, `type`, `reason` | Every event the controller emits ([Events and conditions](#events-and-conditions)). Each transition is one: `UpgradeStarted`, `UpgradeFinished`, `UpgradeHalted`, `AutomaticUpgradeFailed` (a rollout's upgrade failed or timed out), `StuckReleaseRecovered`, `RecoveryLimitReached`, `HelmReleaseFailed` (gave up), `TeardownTimedOut`, `Deleted`, `RolloutHalted`, `CodeChangeHalted`, `ReleaseMoveHalted`, ... |
+| `cluster_vending_cluster_provisioning_seconds` | Histogram | | A cluster's creation to its first RUNNING (imports excluded). |
+| `cluster_vending_upgrade_duration_seconds` | Histogram | | A finished Kubernetes upgrade, from first seen in progress. |
+| `cluster_vending_component_install_seconds` | Histogram | `component` | A platform component's INSTALLING to READY. |
+| `cluster_vending_results_write_failures_total` | Counter | `kind` | Scan results not written to the cluster's results bucket. |
+
+controller-runtime adds `controller_runtime_reconcile_total`,
+`controller_runtime_reconcile_errors_total`, `controller_runtime_reconcile_time_seconds`
+(per `controller`) and `workqueue_*` (per `name`).
+
+**Live reader.**
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `cluster_vending_live_rpc_requests_total`, `cluster_vending_live_rpc_duration_seconds`, `cluster_vending_live_rpc_in_flight` | Counter, Histogram, Gauge | `rpc_service`, `rpc_method`, `rpc_type` (`code`) | Live reads served, by outcome code; their duration; those in flight. |
+| `cluster_vending_live_builds_total` | Counter | `kind`, `outcome` | Builds of a live view, by outcome. |
+| `cluster_vending_live_build_seconds` | Histogram | `kind` | Their duration. |
+| `cluster_vending_live_refused_total` | Counter | `why` | Reads answered from a cooldown or refused busy. |
+| `cluster_vending_live_view_bytes` | Gauge | | Bytes the views keep. |
+
+**Scraping.** `config/prometheus` (ServiceMonitors for the three processes and the
+PrometheusRule; uncomment it in `config/default`) or the chart's
+`metrics.serviceMonitor.enabled` and `metrics.prometheusRule.enabled`. Each target
+gets `cluster_vending_role` (`server`, `controller`, `live`), which the alerts select
+on. The live reader's metrics port and the controller's are reached from namespaces
+labelled `metrics=enabled` (`networkPolicy.metricsFrom`); the API server's `/metrics`
+shares its API port, so Prometheus goes in `networkPolicy.server.from`.
+`config/grafana/cluster-vending-fleet.json` is a fleet overview dashboard (clusters
+by phase and minor, components not ready, Helm releases, rollouts, transitions,
+deletions, API latency and errors, live reads, reconcile errors).
+
+**Alerts** (`config/prometheus/rules.yaml`; `make prom-rules-check` runs promtool on
+them). The fleet alerts fire only on a fresh snapshot of the publishing leader
+(`fleet_metrics_active == 1`, last success under 120 s ago); a stale snapshot is its
+own alert. Each alert's `runbook_url` is its section below.
+
+#### ClusterVendingControllerDown
+
+No controller answers its scrape: nothing reconciles, rolls out or deletes. Check
+the controller Deployment (`kubectl -n cluster-vending-system get pods`), its logs
+and the leader election Lease. The API keeps serving reads of the stored state.
+
+#### ClusterVendingMetricsTargetDown
+
+A target does not answer. Check the pod, then the scrape path: the metrics port, the
+Service, `networkPolicy.metricsFrom` (live reader, controller) or
+`networkPolicy.server.from` (API server).
+
+#### ClusterVendingReconcileErrors
+
+More than 20% of a controller's reconciles fail for 15 minutes. The controller's logs
+name the object and the error: an AWS API error, a provider that is down, a
+Kubernetes API that refuses. `cluster_vending_store_requests_total{outcome!="ok"}`
+shows store errors.
+
+#### ClusterVendingReconcileStuck
+
+A worker has run one reconcile for over 15 minutes: a slow AWS or workload-cluster
+call holds it, and that controller's queue waits behind it
+(`workqueue_depth{name=...}`). Take a goroutine dump (`SIGQUIT`) if it does not move.
+
+#### ClusterVendingRPCServerErrors
+
+More than 5% of API calls fail with `internal`, `unknown`, `unavailable` or
+`deadline_exceeded`. Look at `cluster_vending_rpc_requests_total` by `rpc_method`,
+the store's outcomes and the API server's logs.
+
+#### ClusterVendingLiveReaderUnreachable
+
+Over half of the live reads time out or never reach the live reader: node lists and
+`GetNodeResources` fail. Check the live reader pod, its Service and
+`networkPolicy.live`; `cluster_vending_live_refused_total` shows a busy reader.
+
+#### ClusterVendingFleetMetricsStale
+
+The leader's fleet snapshot failed to refresh (`fleet_metrics_refresh_errors_total`
+rises): the counts are old. Check cache sync and RBAC in the controller's logs before
+trusting the fleet alerts.
+
+#### ClusterVendingNoFleetPublisher
+
+No controller publishes fleet metrics: none is leader, or none runs. Check leader
+election and the controller pods.
+
+#### ClusterVendingResourcesFailed
+
+Accounts, networks, clusters or tenant components are FAILED for 15 minutes.
+`kubectl get cvc -A` (or the CLI) lists them; their status message and recent events
+say why. Fix the cause, then `cluster retry` where it applies.
+
+#### ClusterVendingComponentsFailed
+
+Component instances are FAILED for 15 minutes. The cluster's
+`status.platformComponents` has the chart, Helm state and last error;
+`cluster retry` after the fix.
+
+#### ClusterVendingComponentNotReady
+
+A component instance has not been Ready for 30 minutes. Check its workloads in the
+workload cluster (the platform waits for its Deployments, StatefulSets and
+DaemonSets), its Helm state and `nextRetryAt` (backoff).
+
+#### ClusterVendingHelmReleaseGaveUp
+
+The platform gave up on a release after `--helm-max-failures` counted failures: it is
+tried again only at the backoff cap. Fix the chart, values or workload, then
+`cluster retry`. See [Helm operations](#helm-operations).
+
+#### ClusterVendingHelmReleaseStuck
+
+A Helm release is pending-* or uninstalling for 30 minutes. The platform recovers a
+stuck release up to 3 times (`StuckReleaseRecovered` events); past that, see
+`ClusterVendingStuckReleaseRecoveryLimit`.
+
+#### ClusterVendingStuckReleaseRecoveryLimit
+
+A stuck release was recovered as often as allowed and the component stays FAILED.
+Look at the chart's release in the workload cluster (`helm -n <ns> history`) and fix
+it by hand, then `cluster retry`.
+
+#### ClusterVendingRolloutHalted
+
+A channel's rollout (Kubernetes, release or code) halted: more clusters of a tier
+failed than its policy's `maxFailed`. `kubectl get cvch <channel> -o yaml` lists the
+members; fix or retry the failed clusters.
+
+#### ClusterVendingUpgradeHalted
+
+A cluster's Kubernetes upgrade halted after the add-on recoveries. Its
+`status.upgrade.message` names what did not settle; `cluster retry` resumes it.
+
+#### ClusterVendingChangeHalted
+
+A cluster's code or catalog change, or its component move to a release, halted on a
+failure. The cluster's events (`CodeChangeHalted`, `ReleaseMoveHalted`) and status say
+which step.
+
+#### ClusterVendingDeletionStuck
+
+An owner has been deleting for 2 hours. Its `DeletionBlocked` condition names the
+dependents it waits for; its status message lists the cloud resources left. See the
+deletion order in [Deletion](#deletion).
+
+#### ClusterVendingTeardownTimedOut
+
+A cluster's teardown (its load balancers and Karpenter's nodes) passed
+`--teardown-timeout` with objects left. The deletion went on; their cloud resources
+may be left in the account: the event names them, delete them in AWS.
+
+#### ClusterVendingAccountAccessLost
+
+An account's access check fails (`AccessVerified` False): the tenant role cannot be
+used in a region or lacks a permission. `account verify` names the check; fix the
+role's stack.
+
+#### ClusterVendingClustersUnreachable
+
+The controller cannot read a workload cluster (`Reachable` False:
+`CLUSTER_UNREACHABLE` or `CREDENTIALS_REJECTED`). Scans, component readiness and node
+counts are stale for it. Check the endpoint, the access entries and the kubeconfig
+Secret.
+
+#### ClusterVendingScanLagging
+
+A running cluster was not scanned for two intervals (deprecations 13 h,
+recommendations and policy 1 h). Each scanner has one worker: check
+`controller_runtime_reconcile_time_seconds` of that controller and unreachable
+clusters.
+
+#### ClusterVendingResultsWriteFailing
+
+Scan results do not reach the clusters' results buckets: a bucket missing or not
+Ready, or a tenant role that cannot write it. The Cluster keeps the counts and a
+notice; the controller logs the cause. See [Results in S3](#results-in-s3).
+
+#### ClusterVendingProvisioningSlow
+
+A network or cluster is provisioning for over an hour. Check its conditions, the
+provider's queue, cloud quotas and the freeze (frozen time counts).
+
+#### ClusterVendingUpgradePhaseSlow
+
+An upgrade step has lasted 30 minutes: node drains, add-ons or components that do not
+settle. Tune the threshold to your workloads.
+
+#### ClusterVendingFreezeNotConfirmed
+
+The platform freeze is not confirmed after 10 minutes: some resources could not be
+paused. `admin freeze status` shows them.
 
 ### Runbook: provider upgrade
 
@@ -2289,6 +2638,18 @@ What is not verified, or not built. Anything not on this list works as described
   release move. A chart with a separate CRD chart (`install.helm.crds`) gets both in one pass.
 - **Automatic upgrades have no rollback.** EKS cannot downgrade a cluster. A failed
   component move halts until `cluster retry`.
+- **The deletion's cloud sweep finds only tagged resources.** It deletes Karpenter's
+  instances and launch templates and the AWS Load Balancer Controller's load balancers,
+  target groups and security groups by the cluster's tags. A Classic Load Balancer of the
+  in-tree cloud provider (a Service without the controller), an instance or load balancer
+  made by hand, or one whose tags were removed is left, and the network's deletion then
+  waits on it (`DependencyViolation`, named in the network's message). A load balancer with
+  deletion protection is not deleted: the sweep reports it and times out. The sweep has
+  not run against real AWS.
+- **Changing a cluster's labels rolls its platform pool.** The labels are tags of the
+  EC2NodeClass `platform-pool`, and Karpenter treats a change of its tags as drift: it
+  replaces the pool's nodes within the pool's disruption budget. The first rollout of a
+  build that adds the tags does the same once for every cluster.
 - **PersistentVolumeClaims are not deleted** with a cluster. The EBS volumes of a claim
   with a `Delete` reclaim policy are left in AWS, as an EKS deletion leaves them.
 - **A release's `default` minor is not applied.** A cluster on no channel keeps the

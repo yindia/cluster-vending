@@ -606,6 +606,13 @@ type AWSClusterStatus struct {
 	// nodeGroupARN of the default node group.
 	// +optional
 	NodeGroupARN string `json:"nodeGroupARN,omitempty"`
+	// karpenterNodeRole is the IAM role Karpenter's nodes run as, and
+	// karpenterNodeRoleARN its ARN, once it is Ready: what an EC2NodeClass
+	// the tenant makes names in spec.role.
+	// +optional
+	KarpenterNodeRole string `json:"karpenterNodeRole,omitempty"`
+	// +optional
+	KarpenterNodeRoleARN string `json:"karpenterNodeRoleARN,omitempty"`
 	// addons are the cluster's EKS add-ons.
 	// +listType=map
 	// +listMapKey=name
@@ -751,6 +758,11 @@ type ClusterUpgrade struct {
 	// none of their charts changed version or values for this upgrade.
 	// +optional
 	SkippedSteps []ClusterUpgradePhase `json:"skippedSteps,omitempty"`
+	// tenantPoolsBehind is a warning, not a wait: the tenant's Karpenter
+	// pools whose nodes run another kubelet minor, as "<pool> (<minor>)".
+	// They are the tenant's to roll.
+	// +optional
+	TenantPoolsBehind []string `json:"tenantPoolsBehind,omitempty"`
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes

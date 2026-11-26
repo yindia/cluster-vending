@@ -16,7 +16,9 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/auth"
 	"github.com/yindia/cluster-vending/pkg/fault"
+	"github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1/cloudv1connect"
 	"github.com/yindia/cluster-vending/pkg/server/service"
+	"github.com/yindia/cluster-vending/pkg/telemetry"
 )
 
 // Verifier turns a bearer token into the caller it stands for
@@ -32,26 +34,55 @@ type Options struct {
 	Mode auth.Mode
 	// Verifier checks the tokens; required unless Mode is none.
 	Verifier Verifier
-	// Logger receives one line per write and per refused call, with the
-	// caller's subject. Never a token. Nil: nothing is logged.
+	// Logger receives one line per write, per sensitive read and per
+	// refused call, with the caller's subject and address. Never a token.
+	// Nil: nothing is logged.
 	Logger *slog.Logger
+	// Failed is told why each refused call was refused (one of the
+	// telemetry.Auth* reasons); nil: nobody is told.
+	Failed func(reason string)
 }
 
 const (
 	headerAuthorization = "Authorization"
 	headerChallenge     = "WWW-Authenticate"
 	schemeBearer        = "Bearer"
+	// subjectAnonymous is the subject audited for a caller of mode none.
+	subjectAnonymous = "anonymous"
 )
+
+// sensitiveReads are the reads that are audited like writes: the external
+// IDs of account onboarding, and the live reads of the workload clusters.
+var sensitiveReads = map[string]bool{
+	cloudv1connect.TenantServiceGetAccountOnboardingProcedure: true,
+	cloudv1connect.ClusterServiceListNodeGroupNodesProcedure:  true,
+	cloudv1connect.ClusterServiceGetNodeResourcesProcedure:    true,
+}
+
+// audited is the audit line of the RPC of spec: "api write", "api
+// sensitive read", or "" for a read that is not logged (or a procedure
+// that is not an RPC of the API).
+func audited(spec connect.Spec) string {
+	if sensitiveReads[spec.Procedure] {
+		return "api sensitive read"
+	}
+	if method, ok := spec.Schema.(protoreflect.MethodDescriptor); ok && auth.Writes(method) {
+		return "api write"
+	}
+	return ""
+}
 
 // Interceptor authenticates every RPC:
 //
-//   - mode none: nothing is checked; the caller is anonymous.
+//   - mode none: nothing is checked; the caller is anonymous, and is
+//     audited as subject "anonymous" with its address.
 //   - mode required: a request without a token, or with one no issuer of
 //     the configuration signed for this API (signature, issuer, audience,
 //     expiry), is refused UNAUTHENTICATED before the handler runs.
 //
-// An accepted caller may call every RPC; nothing is authorized. Writes and
-// refusals are logged with the caller's subject and the request's tenant.
+// An accepted caller may call every RPC; nothing is authorized. Writes,
+// the sensitive reads (sensitiveReads) and refusals are logged with the
+// caller's subject, its address and the request's tenant, in both modes.
 // It answers with faults, so it goes inside service.Faults.
 func Interceptor(o Options) connect.ServerInterceptor {
 	if o.Logger == nil {
@@ -60,7 +91,7 @@ func Interceptor(o Options) connect.ServerInterceptor {
 	return func(next connect.ServerFunc) connect.ServerFunc {
 		return func(ctx context.Context, spec connect.Spec, stream connect.ServerStream) error {
 			if o.Mode == auth.ModeNone || o.Mode == "" {
-				return next(auth.WithIdentity(ctx, auth.Anonymous()), spec, stream)
+				return o.audit(auth.WithIdentity(ctx, auth.Anonymous()), spec, stream, next)
 			}
 			return o.serve(ctx, spec, stream, next)
 		}
@@ -69,24 +100,40 @@ func Interceptor(o Options) connect.ServerInterceptor {
 
 // serve is one RPC in mode required.
 func (o Options) serve(ctx context.Context, spec connect.Spec, stream connect.ServerStream, next connect.ServerFunc) error {
-	id, err := o.authenticate(ctx)
+	id, reason, err := o.authenticate(ctx)
 	if err != nil {
-		o.Logger.WarnContext(ctx, "api call refused", "procedure", spec.Procedure, "error", err)
+		if o.Failed != nil {
+			o.Failed(reason)
+		}
+		o.Logger.WarnContext(ctx, "api call refused", "procedure", spec.Procedure, "peer", peer(ctx), "error", err)
 		return err
 	}
-	ctx = auth.WithIdentity(ctx, id)
-	method, ok := spec.Schema.(protoreflect.MethodDescriptor)
-	if !ok || !auth.Writes(method) {
+	return o.audit(auth.WithIdentity(ctx, id), spec, stream, next)
+}
+
+// audit runs the RPC as the caller in ctx and logs it when it is audited.
+func (o Options) audit(ctx context.Context, spec connect.Spec, stream connect.ServerStream, next connect.ServerFunc) error {
+	msg := audited(spec)
+	if msg == "" {
 		// A read, or not an RPC of the API (the server answers
 		// UNIMPLEMENTED): nothing to log.
 		return next(ctx, spec, stream)
 	}
-	call := &call{options: o, spec: spec, id: id}
+	call := &call{options: o, spec: spec, id: auth.FromContext(ctx), msg: msg, peer: peer(ctx)}
 	return call.done(ctx, next(ctx, spec, &recordedStream{ServerStream: stream, call: call}))
 }
 
-// authenticate is whom the bearer token of the request in ctx stands for.
-func (o Options) authenticate(ctx context.Context) (*auth.Identity, error) {
+// peer is the address the request in ctx came from; "" when unknown.
+func peer(ctx context.Context) string {
+	if info, ok := connect.CallInfoForServerContext(ctx); ok && info != nil {
+		return info.PeerAddr
+	}
+	return ""
+}
+
+// authenticate is whom the bearer token of the request in ctx stands for,
+// or why it stands for nobody.
+func (o Options) authenticate(ctx context.Context) (*auth.Identity, string, error) {
 	info, _ := connect.CallInfoForServerContext(ctx)
 	header := ""
 	if info != nil {
@@ -94,22 +141,23 @@ func (o Options) authenticate(ctx context.Context) (*auth.Identity, error) {
 	}
 	if header == "" {
 		challenge(info)
-		return nil, fault.New(fault.Unauthenticated, "this API needs a bearer token: run `cluster-vending login`, or set CV_TOKEN")
+		return nil, telemetry.AuthMissingToken, fault.New(fault.Unauthenticated, "this API needs a bearer token: run `cluster-vending login`, or set CV_TOKEN")
 	}
 	scheme, token, _ := strings.Cut(header, " ")
 	token = strings.TrimSpace(token)
 	if !strings.EqualFold(scheme, schemeBearer) || token == "" {
 		challenge(info)
-		return nil, fault.New(fault.Unauthenticated, "the Authorization header must be \"Bearer <token>\"")
+		return nil, telemetry.AuthMalformedHeader, fault.New(fault.Unauthenticated, "the Authorization header must be \"Bearer <token>\"")
 	}
 	id, err := o.Verifier.Verify(ctx, token)
 	if err != nil {
 		if fault.Is(err, fault.Unauthenticated) {
 			challenge(info)
+			return nil, telemetry.AuthRejected, err
 		}
-		return nil, err
+		return nil, telemetry.AuthUnavailable, err
 	}
-	return id, nil
+	return id, "", nil
 }
 
 // challenge tells the client how to authenticate (RFC 6750).
@@ -119,28 +167,36 @@ func challenge(info *connect.CallInfo) {
 	}
 }
 
-// call is one authenticated write: who makes it, on which tenant.
+// call is one audited RPC: who makes it, from where, on which tenant.
 type call struct {
 	options Options
 	spec    connect.Spec
 	id      *auth.Identity
+	// msg is the audit line's message (audited).
+	msg string
+	// peer is the caller's address.
+	peer string
 	// tenant is the tenant the request named, once it was received.
 	tenant string
 }
 
-// done logs the end of the write and returns err.
+// done logs the end of the call and returns err.
 func (c *call) done(ctx context.Context, err error) error {
 	outcome := "ok"
 	if err != nil {
 		outcome = connect.CodeOf(service.ToConnect(err)).String()
 	}
-	c.options.Logger.InfoContext(ctx, "api write", "procedure", c.spec.Procedure, "subject", c.id.Subject,
-		"username", c.id.Username, "issuer", c.id.Issuer, "tenant", c.tenant, "outcome", outcome)
+	subject := c.id.Subject
+	if c.id.Anonymous {
+		subject = subjectAnonymous
+	}
+	c.options.Logger.InfoContext(ctx, c.msg, "procedure", c.spec.Procedure, "subject", subject,
+		"username", c.id.Username, "issuer", c.id.Issuer, "tenant", c.tenant, "outcome", outcome, "peer", c.peer)
 	return err
 }
 
-// recordedStream is the stream of a write: it notes the tenant of the
-// request for the log. It checks nothing.
+// recordedStream is the stream of an audited call: it notes the tenant of
+// the request for the log. It checks nothing.
 type recordedStream struct {
 	connect.ServerStream
 	call *call

@@ -6,8 +6,11 @@
 #
 #   make deploy-manifests          # render, nothing is applied
 #
-# Authentication is opt-in: this base accepts anonymous callers for every
-# tenant. Use ../auth for an example with required JWT authentication.
+# DEV-ONLY ON ITS OWN: this base runs auth mode none, so it accepts
+# anonymous callers for every tenant (any pod that reaches the Service can
+# freeze the platform or delete any cluster), and `serve` logs an INSECURE
+# warning at start. Deploy ../auth, the production overlay: the same
+# objects with auth mode required (`make deploy-manifests` renders that one).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

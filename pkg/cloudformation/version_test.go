@@ -21,6 +21,11 @@ var goldenHashes = map[int]map[string]string{
 		"updater":     "f2fb3ba901bd7b82d1e84308d53cf17a9b2f1ac3fbfd6ddfda9471a4ab8cdd33",
 		"provisioner": "48463504a026badd79b792e8b1e8542c31ed46c251900e084031eb581f7294f2",
 	},
+	2: {
+		"reader":      "a77bec1f0a520733ffc9ed46a4a100c37ee4ad0004c24358505505e251761c38",
+		"updater":     "e81cfab5274d340cd76bc26a2b89bf3c9115e2b064a2e1e422c1d680d641cdba",
+		"provisioner": "e2a408dad960d99aa60e783378e305cc9672c10c5dd3bd94e784090516c43f0c",
+	},
 }
 
 // managementGoldenHashes is goldenHashes of the management account's

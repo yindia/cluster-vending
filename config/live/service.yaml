@@ -1,4 +1,5 @@
-# Internal only: the API server is its one caller (network_policy.yaml).
+# Internal only: the API server is its one caller (network_policy.yaml);
+# Prometheus scrapes the metrics port.
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,5 +14,9 @@ spec:
     port: 8090
     protocol: TCP
     targetPort: http
+  - name: metrics
+    port: 8091
+    protocol: TCP
+    targetPort: metrics
   selector:
     app.kubernetes.io/name: cluster-vending-live

@@ -138,11 +138,16 @@ type ProviderRuntime struct {
 // only the workload clusters (defaultHelmMaxReconcileRate). Two replicas
 // with leader election: one active, one hot standby.
 func DefaultProviderRuntime() ProviderRuntime {
-	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, HelmPoll: DefaultHelmPoll, MaxReconcileRate: 10, HelmMaxReconcileRate: defaultHelmMaxReconcileRate,
+	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: DefaultEC2Poll, HelmPoll: DefaultHelmPoll, MaxReconcileRate: 10, HelmMaxReconcileRate: defaultHelmMaxReconcileRate,
 		CPURequest: "1", MemoryRequest: "2Gi", CPULimit: "4", MemoryLimit: "4Gi", Replicas: 2}
 }
 
 const (
+	// DefaultEC2Poll is how often provider-aws-ec2 checks each resource
+	// unasked (DefaultProviderRuntime). Whatever waits for that provider
+	// to have observed a change without a signal from it (the network's
+	// observation bound) is derived from it.
+	DefaultEC2Poll = 30 * time.Minute
 	// DefaultHelmPoll is how often provider-helm looks at each Release
 	// unasked: only to catch drift in a workload cluster. A spec change
 	// (a new digest, a retry's annotation, a pause lifted) is reconciled

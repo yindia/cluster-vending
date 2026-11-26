@@ -1,0 +1,12 @@
+# The API's login as a production install sets it (the auth section of
+# config/server/auth/platform.yaml; config/helm_chart_test.go keeps them
+# equal). `make helm-lint` and `make helm-template` render with it. Replace
+# the issuer and audience with your own. Public verification settings only.
+platform:
+  auth:
+    mode: required
+    issuers:
+    - name: keycloak
+      issuer: https://login.example.com/realms/platform
+      audiences: [cv-api]
+      usernameClaim: preferred_username

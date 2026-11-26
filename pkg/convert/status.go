@@ -115,7 +115,7 @@ func upgrade(p *cloudv1.ClusterUpgrade) *cloudv1alpha1.ClusterUpgrade {
 	out := &cloudv1alpha1.ClusterUpgrade{FromVersion: p.GetFromVersion(), ToVersion: p.GetToVersion(),
 		Phase: upgradePhases[p.GetPhase()], Message: p.GetMessage(), AddonsBehind: p.GetAddonsBehind(),
 		PhaseStartTime: timeOf(p.GetPhaseStartTime()), ComponentsBehind: p.GetComponentsBehind(),
-		Recoveries: p.GetRecoveries(), Halted: p.GetHalted()}
+		Recoveries: p.GetRecoveries(), Halted: p.GetHalted(), TenantPoolsBehind: p.GetTenantPoolsBehind()}
 	for _, step := range p.GetSkippedSteps() {
 		out.SkippedSteps = append(out.SkippedSteps, upgradePhases[step])
 	}
@@ -248,7 +248,8 @@ func awsStatus(p *cloudv1.AwsClusterStatus) *cloudv1alpha1.AWSClusterStatus {
 		return nil
 	}
 	out := &cloudv1alpha1.AWSClusterStatus{ClusterARN: p.GetClusterArn(), ClusterSecurityGroupID: p.GetClusterSecurityGroupId(),
-		PlatformVersion: p.GetPlatformVersion(), NodeGroupARN: p.GetNodeGroupArn()}
+		PlatformVersion: p.GetPlatformVersion(), NodeGroupARN: p.GetNodeGroupArn(),
+		KarpenterNodeRole: p.GetKarpenterNodeRole(), KarpenterNodeRoleARN: p.GetKarpenterNodeRoleArn()}
 	for _, a := range p.GetAddons() {
 		if a.GetName() == "" || slices.ContainsFunc(out.Addons, func(o cloudv1alpha1.AWSAddonStatus) bool { return o.Name == a.GetName() }) {
 			continue

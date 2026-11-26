@@ -43,6 +43,7 @@ func WithAWSClient(d reconcile.Deps, c *awscloud.Client) reconcile.Deps {
 	d.InstanceProfiles = func(a awscloud.Access, region string) (awscloud.InstanceProfileAPI, error) {
 		return c.InstanceProfiles(a, region)
 	}
+	d.CloudSweep = c.CloudSweep
 	return d
 }
 

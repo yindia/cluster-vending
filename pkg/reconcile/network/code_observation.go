@@ -7,14 +7,20 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
 // providerObservationBound is how long after the platform last changed an
 // object its provider has surely observed it: Crossplane reconciles a managed
-// resource on every spec change it watches and again every poll interval
-// (10m by default for the AWS providers), plus margin.
-const providerObservationBound = 15 * time.Minute
+// resource on every spec change it watches and again every poll interval.
+// The network's objects are EC2 resources, polled at the EC2 provider's
+// interval (crossplaneaws.DefaultEC2Poll), plus margin.
+const providerObservationBound = crossplaneaws.DefaultEC2Poll + providerObservationMargin
+
+// providerObservationMargin covers a poll that runs late (queueing behind
+// the provider's reconcile rate) after the interval.
+const providerObservationMargin = 5 * time.Minute
 
 // observedSinceApply reports whether the conditions of an object whose
 // provider stamps no observedGeneration on them (provider-aws v2.9.0:

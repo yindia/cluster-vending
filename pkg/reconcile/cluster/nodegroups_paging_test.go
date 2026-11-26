@@ -64,7 +64,7 @@ func TestReadNodesCountsEveryNodeAcrossPages(t *testing.T) {
 	w, _ := nodeGroupWorld(t, newFakeWorkload(interceptor.Funcs{}))
 	c := newFakeWorkload(pagedNodes(1200, &calls, nil)).c
 
-	counts, view := w.svc.readNodes(t.Context(), c, "")
+	counts, view := w.svc.readNodes(t.Context(), c)
 
 	require.Equal(t, int32(1200), counts.count["platform"])
 	require.True(t, view.known, "every page was read")
@@ -84,7 +84,7 @@ func TestReadNodesStopsAtThePassDeadline(t *testing.T) {
 		}
 	})).c
 
-	_, view := w.svc.readNodes(ctx, c, "")
+	_, view := w.svc.readNodes(ctx, c)
 
 	require.False(t, view.known)
 	require.LessOrEqual(t, calls, 3)

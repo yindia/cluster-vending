@@ -21,6 +21,8 @@ provider-credentials-secret: tenant-acme/aws-e919d8e2-credentials
 live:
   url: http://127.0.0.1:8090
   addr: 127.0.0.1:8090
+  # /metrics only, apart from the internal endpoint (the chart's 8091).
+  metricsAddr: 127.0.0.1:8091
   allowWithoutAuth: true
 # The controller's own settings (`make run-controller` reads this same file;
 # `serve` ignores them). Its AWS credentials are never here: export
@@ -30,6 +32,8 @@ live:
 # would leave behind for the next start to wait out.
 leader-elect: false
 health-probe-addr: 127.0.0.1:8081
+# The controller's Prometheus metrics (docs/local-development.md#metrics).
+metrics-addr: 127.0.0.1:8082
 automatic-upgrades: true
 # Local testing only: act with the Secret's keys directly, without assuming
 # the account's tenant role. Needs provider-credentials-secret.

@@ -49,6 +49,7 @@ const (
 //	Cluster       StuckReleaseRecovered       Warning  a stuck Helm release's record was removed so it installs again
 //	Cluster       RecoveryLimitReached        Warning  a stuck Helm release was recovered as often as allowed
 //	Cluster       PlatformComponentsReady     Normal   every platform component is installed
+//	Cluster       NodePoolsHandedOver         Normal   Karpenter pools an earlier build made for the tenant are the tenant's now
 //	Cluster       DeprecatedAPIs              Warning  the scan found API versions removed at the next Kubernetes version
 //	Cluster       DeprecationScanFailed       Warning  the scan for deprecated API versions failed
 //	Cluster       DeprecationScanClean        Normal   a scan that had findings, or failed, found nothing removed now
@@ -108,6 +109,7 @@ const (
 	ReasonNodeGroupDeleting           = "NodeGroupDeleting"
 	ReasonNodeGroupDeleted            = "NodeGroupDeleted"
 	ReasonNodeGroupFailed             = "NodeGroupFailed"
+	ReasonNodePoolsHandedOver         = "NodePoolsHandedOver"
 	ReasonComponentInstalling         = "ComponentInstalling"
 	ReasonComponentReady              = "ComponentReady"
 	ReasonComponentUpgrading          = "ComponentUpgrading"

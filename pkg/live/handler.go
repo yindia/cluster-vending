@@ -41,15 +41,28 @@ func (s *liveService) GetNodeResources(ctx context.Context, req *cloudv1.GetNode
 
 // NewHandler serves r over Connect, with /healthz, /readyz and /metrics.
 func NewHandler(r *Reader) http.Handler {
-	server := connect.NewServer()
+	server := connect.NewServer(reads.Interceptor)
 	cloudv1connect.RegisterClusterServiceHandler(server, &liveService{r: r})
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server)
+	mountOperational(mux)
+	return mux
+}
+
+// NewMetricsHandler serves /metrics, /healthz and /readyz only: what a
+// scraper reaches on the metrics listener (live-metricsAddr), without the
+// internal endpoint.
+func NewMetricsHandler() http.Handler {
+	mux := http.NewServeMux()
+	mountOperational(mux)
+	return mux
+}
+
+func mountOperational(mux *http.ServeMux) {
 	ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 	mux.Handle("GET /metrics", promhttp.HandlerFor(metrics, promhttp.HandlerOpts{}))
 	mux.HandleFunc("GET /healthz", ok)
 	mux.HandleFunc("GET /readyz", ok)
-	return mux
 }
 
 // Client is what the API server calls the live reader with.

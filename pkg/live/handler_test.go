@@ -2,6 +2,7 @@ package live
 
 import (
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -58,10 +59,39 @@ func TestHandlerOverTheWire(t *testing.T) {
 	if !strings.Contains(string(body), `cluster_vending_live_builds_total{kind="nodes",outcome="ok"}`) {
 		t.Fatalf("metrics lack the builds: %s", body)
 	}
+	for _, want := range []string{
+		`cluster_vending_live_rpc_requests_total{code="ok",rpc_method="ListNodeGroupNodes",rpc_service="cloud.v1.ClusterService",rpc_type="unary"}`,
+		`cluster_vending_live_rpc_in_flight{rpc_method="GetNodeResources",rpc_service="cloud.v1.ClusterService",rpc_type="unary"} 0`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("metrics lack the reads %s: %s", want, body)
+		}
+	}
 
 	srv.Close()
 	_, err = c.GetNodeResources(t.Context(), &cloudv1.GetNodeResourcesRequest{TenantId: tenant, ClusterId: clusterID})
 	if err := Forward(err); connect.CodeOf(err) != connect.CodeUnavailable || ReasonOf(err) != ReasonLiveReaderUnavailable {
 		t.Fatalf("reader down: %v (%q)", err, ReasonOf(err))
+	}
+}
+
+// The metrics listener serves the metrics and the probes, never the
+// internal endpoint a scraper must not reach.
+func TestMetricsHandlerServesNoRPC(t *testing.T) {
+	srv := httptest.NewServer(NewMetricsHandler())
+	defer srv.Close()
+	for path, want := range map[string]int{"/metrics": http.StatusOK, "/healthz": http.StatusOK,
+		"/cloud.v1.ClusterService/GetNodeResources": http.StatusNotFound} {
+		res, err := srv.Client().Post(srv.URL+path, "application/json", strings.NewReader("{}"))
+		if path != "/cloud.v1.ClusterService/GetNodeResources" {
+			res, err = srv.Client().Get(srv.URL + path)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != want {
+			t.Errorf("%s: %d, want %d", path, res.StatusCode, want)
+		}
 	}
 }

@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/helmrel"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -213,5 +216,138 @@ func TestRolloutWithoutWorkloadClientsIsHelmsWord(t *testing.T) {
 	d.behind = true
 	if r := g.rollout(t.Context(), "x", d); r.Ready || r.Failed {
 		t.Errorf("behind: %+v, want waiting", r)
+	}
+}
+
+// passWith is world.pass with ctx (a retry in it).
+func (w world) passWith(t *testing.T, ctx context.Context, row *model.Cluster) *model.Cluster {
+	t.Helper()
+	p, err := w.svc.installPlatform(ctx, row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &cloudv1.ClusterStatus{}
+	withPlatform(st, p)
+	if row.Status, err = Encode(st); err != nil {
+		t.Fatal(err)
+	}
+	return row
+}
+
+// timedOutBase is a world whose base timed out rolling out at *at.
+func timedOutBase(t *testing.T, at *time.Time) (world, *model.Cluster) {
+	t.Helper()
+	now = func() time.Time { return *at }
+	t.Cleanup(func() { now = time.Now })
+	w, _, _ := rolloutWorld(t, controllerOf(1, 1, 3, 1))
+	w.helmConfig(t)
+	row := w.pass(t, w.cluster(t))
+	w.deployed(t, "base")
+	row = w.pass(t, row)
+	*at = at.Add(10*time.Minute + time.Second)
+	row = w.pass(t, row)
+	if base := componentOf(storedPlatform(row), "base"); !strings.Contains(base.GetMessage(), "rollout timed out") {
+		t.Fatalf("base = %s %q, want it timed out", base.GetPhase(), base.GetMessage())
+	}
+	return w, row
+}
+
+// A person's retry of a component whose rollout timed out gives it a new
+// install timeout from the retry: the clock restarts, the component does
+// not fail again at once (and again on every later retry).
+func TestARetryRestartsATimedOutRolloutsClock(t *testing.T) {
+	at := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	w, row := timedOutBase(t, &at)
+
+	at = at.Add(time.Minute)
+	retry := withRetry(t.Context(), &model.Retry{At: at, By: "alice", Components: []string{"base"}})
+	row = w.passWith(t, retry, row)
+	at = at.Add(time.Minute)
+	row = w.pass(t, row)
+
+	base := componentOf(storedPlatform(row), "base")
+	if base.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING || strings.Contains(base.GetMessage(), "timed out") {
+		t.Fatalf("base = %s %q after the retry, want it rolling out on a new clock", base.GetPhase(), base.GetMessage())
+	}
+	mark, ok := helmrel.ParseRolloutMark(w.release(t, "base").GetAnnotations()[helmrel.RolloutAnnotation])
+	if !ok || mark.Since.Before(at.Add(-time.Minute)) {
+		t.Fatalf("rollout mark %+v, %v: want it started at the retry or later", mark, ok)
+	}
+
+	at = at.Add(10*time.Minute + time.Second)
+	row = w.pass(t, row)
+	if base := componentOf(storedPlatform(row), "base"); !strings.Contains(base.GetMessage(), "rollout timed out") {
+		t.Errorf("base = %s %q: a full timeout after the retry it times out again", base.GetPhase(), base.GetMessage())
+	}
+}
+
+// The automatic recovery of a release move or a catalog change is a retry
+// (withRetry): it restarts the clock the same way.
+func TestARecoveryRestartsATimedOutRolloutsClock(t *testing.T) {
+	at := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	w, row := timedOutBase(t, &at)
+
+	at = at.Add(time.Minute)
+	row = w.passWith(t, withRetry(t.Context(), retryWith(nil, "base", at)), row)
+	at = at.Add(time.Minute)
+	row = w.pass(t, row)
+
+	if base := componentOf(storedPlatform(row), "base"); strings.Contains(base.GetMessage(), "timed out") {
+		t.Fatalf("base = %s %q after the recovery", base.GetPhase(), base.GetMessage())
+	}
+}
+
+// While the workload cluster's API cannot be read, the install timeout
+// neither starts nor runs out: the component waits, transient and not
+// counted, and says why. The timeout runs from when the workloads were
+// read and found unavailable.
+func TestAnUnreadableWorkloadAPIDoesNotTimeARolloutOut(t *testing.T) {
+	at := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	now = func() time.Time { return at }
+	t.Cleanup(func() { now = time.Now })
+	w, _, fw := rolloutWorld(t, controllerOf(1, 1, 3, 1))
+	w.helmConfig(t)
+	row := w.pass(t, w.cluster(t))
+	w.deployed(t, "base")
+	row = w.pass(t, row) // read: unavailable, the clock starts
+	fw.err = errors.New("dial tcp 10.0.0.1:443: i/o timeout")
+
+	at = at.Add(30 * time.Minute)
+	row = w.pass(t, row)
+
+	base := componentOf(storedPlatform(row), "base")
+	if base.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING || base.GetCountedFailures() != 0 ||
+		!strings.Contains(base.GetMessage(), "i/o timeout") {
+		t.Fatalf("base = %s %q, %d counted: want it waiting with the read error, nothing counted",
+			base.GetPhase(), base.GetMessage(), base.GetCountedFailures())
+	}
+
+	fw.err = nil
+	at = at.Add(time.Minute)
+	row = w.pass(t, row)
+	if base := componentOf(storedPlatform(row), "base"); base.GetPhase() != cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING {
+		t.Fatalf("base = %s %q once readable: the clock starts again from the read", base.GetPhase(), base.GetMessage())
+	}
+	at = at.Add(10*time.Minute + time.Second)
+	row = w.pass(t, row)
+	if base := componentOf(storedPlatform(row), "base"); !strings.Contains(base.GetMessage(), "rollout timed out") {
+		t.Errorf("base = %s %q: read and unavailable for the timeout, it times out", base.GetPhase(), base.GetMessage())
+	}
+}
+
+// The backoff's own next attempt (its pause lifted) of a timed-out
+// rollout gets a full install timeout too.
+func TestTheBackoffsNextAttemptRestartsATimedOutRolloutsClock(t *testing.T) {
+	at := time.Date(2026, 11, 26, 10, 0, 0, 0, time.UTC)
+	w, row := timedOutBase(t, &at)
+	next := componentOf(storedPlatform(row), "base").GetNextRetryAt().AsTime()
+
+	at = next.Add(time.Second)
+	row = w.pass(t, row) // the pause is lifted
+	at = at.Add(time.Minute)
+	row = w.pass(t, row)
+
+	if base := componentOf(storedPlatform(row), "base"); strings.Contains(base.GetMessage(), "timed out") || base.GetCountedFailures() != 1 {
+		t.Fatalf("base = %s %q, %d counted after the backoff: want a new clock", base.GetPhase(), base.GetMessage(), base.GetCountedFailures())
 	}
 }

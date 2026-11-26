@@ -55,9 +55,16 @@ func TestLiveReaderDeployment(t *testing.T) {
 	if err := yaml.Unmarshal(documents(t, "live/network_policy.yaml")[0], np); err != nil {
 		t.Fatal(err)
 	}
-	if len(np.Spec.Ingress) != 1 || len(np.Spec.Ingress[0].From) != 1 ||
-		np.Spec.Ingress[0].From[0].PodSelector.MatchLabels["app.kubernetes.io/name"] != "cluster-vending-server" {
-		t.Errorf("live reader ingress = %+v, want the API server's pods only", np.Spec.Ingress)
+	// The internal endpoint (8090) only from the API server's pods; the
+	// metrics-only port (8091) from namespaces labelled metrics=enabled.
+	if len(np.Spec.Ingress) != 2 || len(np.Spec.Ingress[0].From) != 1 ||
+		np.Spec.Ingress[0].From[0].PodSelector.MatchLabels["app.kubernetes.io/name"] != "cluster-vending-server" ||
+		len(np.Spec.Ingress[0].Ports) != 1 || np.Spec.Ingress[0].Ports[0].Port.IntValue() != 8090 {
+		t.Errorf("live reader ingress = %+v, want the API server's pods only on 8090", np.Spec.Ingress)
+	}
+	if metrics := np.Spec.Ingress[1]; len(metrics.Ports) != 1 || metrics.Ports[0].Port.IntValue() != 8091 ||
+		len(metrics.From) != 1 || metrics.From[0].NamespaceSelector == nil || metrics.From[0].NamespaceSelector.MatchLabels["metrics"] != "enabled" {
+		t.Errorf("live reader metrics ingress = %+v, want metrics=enabled namespaces on 8091 only", metrics)
 	}
 	if !slices.Contains(np.Spec.PolicyTypes, networkingv1.PolicyTypeEgress) {
 		t.Error("live reader egress is not limited")

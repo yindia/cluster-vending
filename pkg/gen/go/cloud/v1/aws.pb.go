@@ -733,9 +733,16 @@ type AwsClusterStatus struct {
 	// NodeGroup.status.atProvider.arn
 	NodeGroupArn string `protobuf:"bytes,4,opt,name=node_group_arn,json=nodeGroupArn,proto3" json:"node_group_arn,omitempty"`
 	// Every add-on with the version it runs.
-	Addons        []*AwsAddonStatus `protobuf:"bytes,5,rep,name=addons,proto3" json:"addons,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Addons []*AwsAddonStatus `protobuf:"bytes,5,rep,name=addons,proto3" json:"addons,omitempty"`
+	// The IAM role Karpenter's nodes run as ("<prefix>-karpenter-node") and
+	// its ARN, once the role is Ready: what an EC2NodeClass the tenant makes
+	// names in spec.role (Karpenter makes the instance profile from it; its
+	// controller policy passes only this role). Empty for a cluster without
+	// Karpenter.
+	KarpenterNodeRole    string `protobuf:"bytes,6,opt,name=karpenter_node_role,json=karpenterNodeRole,proto3" json:"karpenter_node_role,omitempty"`
+	KarpenterNodeRoleArn string `protobuf:"bytes,7,opt,name=karpenter_node_role_arn,json=karpenterNodeRoleArn,proto3" json:"karpenter_node_role_arn,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *AwsClusterStatus) Reset() {
@@ -803,6 +810,20 @@ func (x *AwsClusterStatus) GetAddons() []*AwsAddonStatus {
 	return nil
 }
 
+func (x *AwsClusterStatus) GetKarpenterNodeRole() string {
+	if x != nil {
+		return x.KarpenterNodeRole
+	}
+	return ""
+}
+
+func (x *AwsClusterStatus) GetKarpenterNodeRoleArn() string {
+	if x != nil {
+		return x.KarpenterNodeRoleArn
+	}
+	return ""
+}
+
 var File_cloud_v1_aws_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_aws_proto_rawDesc = "" +
@@ -842,14 +863,16 @@ const file_cloud_v1_aws_proto_rawDesc = "" +
 	"\x0fAwsAccessConfig\x12Z\n" +
 	"\x13authentication_mode\x18\x01 \x01(\x0e2\x1f.cloud.v1.AwsAuthenticationModeB\b\xbaH\x05\x82\x01\x02\x10\x01R\x12authenticationMode\"Y\n" +
 	"\x10AwsUpgradePolicy\x12E\n" +
-	"\fsupport_type\x18\x01 \x01(\x0e2\x18.cloud.v1.AwsSupportTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vsupportType\"\xf1\x01\n" +
+	"\fsupport_type\x18\x01 \x01(\x0e2\x18.cloud.v1.AwsSupportTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vsupportType\"\xd8\x02\n" +
 	"\x10AwsClusterStatus\x12\x1f\n" +
 	"\vcluster_arn\x18\x01 \x01(\tR\n" +
 	"clusterArn\x129\n" +
 	"\x19cluster_security_group_id\x18\x02 \x01(\tR\x16clusterSecurityGroupId\x12)\n" +
 	"\x10platform_version\x18\x03 \x01(\tR\x0fplatformVersion\x12$\n" +
 	"\x0enode_group_arn\x18\x04 \x01(\tR\fnodeGroupArn\x120\n" +
-	"\x06addons\x18\x05 \x03(\v2\x18.cloud.v1.AwsAddonStatusR\x06addons*\xf0\x01\n" +
+	"\x06addons\x18\x05 \x03(\v2\x18.cloud.v1.AwsAddonStatusR\x06addons\x12.\n" +
+	"\x13karpenter_node_role\x18\x06 \x01(\tR\x11karpenterNodeRole\x125\n" +
+	"\x17karpenter_node_role_arn\x18\a \x01(\tR\x14karpenterNodeRoleArn*\xf0\x01\n" +
 	"\x15AwsAuthenticationMode\x12'\n" +
 	"#AWS_AUTHENTICATION_MODE_UNSPECIFIED\x10\x00\x12*\n" +
 	"\x1bAWS_AUTHENTICATION_MODE_API\x10\x01\x1a\t\x8a\xb5\x18\x05\n" +

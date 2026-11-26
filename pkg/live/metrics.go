@@ -3,6 +3,8 @@ package live
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+
+	"github.com/yindia/cluster-vending/pkg/telemetry"
 )
 
 // The live reader's metrics (PROP-02 7.4): builds by outcome and their
@@ -19,6 +21,10 @@ var (
 		Help: "Live reads answered without reaching the cluster: cooldown or busy."}, []string{"why"})
 	viewBytes = prometheus.NewGauge(prometheus.GaugeOpts{Name: "cluster_vending_live_view_bytes",
 		Help: "Bytes the live views keep (bounded by Limits.ViewBytes)."})
+
+	// reads are the live RPCs served, by method and code, their duration
+	// and those in flight (cluster_vending_live_rpc_*).
+	reads = telemetry.NewRPCNamed(metrics, "cluster_vending_live_rpc")
 )
 
 func init() {

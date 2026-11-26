@@ -90,9 +90,11 @@ func (u upgrade) nodesSettled(views []*cloudv1.ManagedResource) bool {
 	return kindSettled(views, KindNodeGroup)
 }
 
-// karpenterSettled: no Karpenter node group, or every NodeClaim has a node
-// and every node runs the target's kubelet minor. A read that did not
-// happen or is incomplete is not settled: the step waits.
+// karpenterSettled: no Karpenter node group, or every NodeClaim of the
+// platform's pools has a node and every node of them runs the target's
+// kubelet minor (the tenant's pools are the tenant's to roll:
+// kubeletView.tenantBehind warns of them). A read that did not happen or
+// is incomplete is not settled: the step waits.
 func (u upgrade) karpenterSettled() bool {
 	if !u.karpenterNodes {
 		return true
@@ -252,6 +254,9 @@ func (u upgrade) status(row *model.Cluster, views []*cloudv1.ManagedResource, st
 		out.FromVersion = orName(u.nodesBehind(), u.controlPlane)
 	}
 	out.Message = u.stepMessage(out, views, comps)
+	if u.kubelets != nil {
+		out.TenantPoolsBehind = u.kubelets.tenantBehind(u.target)
+	}
 	out.SkippedSteps = skippedSteps(prev, out, comps)
 	if slices.Contains(out.GetSkippedSteps(), step) {
 		out.Message += "; component versions unchanged, nothing to do in this step"

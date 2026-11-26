@@ -76,6 +76,10 @@
       },
       "additionalProperties": false
     },
+    "allowInsecureNoAuth": {
+      "type": "boolean",
+      "description": "LOCAL/DEV ONLY: render an API without login (platform.auth.mode not required) and a console Ingress without ui.auth"
+    },
     "platform": {
       "type": "object",
       "description": "The shared settings file (/etc/cluster-vending/platform.yaml): flag names plus auth, naas and nodeGroups",
@@ -414,6 +418,21 @@
             }
           },
           "additionalProperties": false
+        },
+        "metrics": {
+          "type": "object",
+          "description": "A metrics-only listener (/metrics and the probes), apart from the internal endpoint",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,
@@ -631,6 +650,46 @@
         },
         "controllerMetrics": {
           "type": "boolean"
+        },
+        "metricsFrom": {
+          "type": "array",
+          "description": "Peers that reach the metrics ports of the live reader and the controller"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "serviceMonitor": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "interval": {
+              "type": "string"
+            },
+            "scrapeTimeout": {
+              "type": "string"
+            },
+            "labels": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        },
+        "prometheusRule": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "labels": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 	"github.com/yindia/cluster-vending/pkg/kube"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // Bounds of what a pass asks of a workload cluster: reading or applying
@@ -49,16 +51,43 @@ func objectRef(u *unstructured.Unstructured) string {
 type kubeletView struct {
 	// known: nodes and NodeClaims were read completely.
 	known bool
-	// minors are the kubelet minors the nodes run ("1.37"); launching the
-	// NodeClaims that have no node yet.
+	// minors are the kubelet minors the nodes of the platform's pools run
+	// ("1.37"); launching their NodeClaims that have no node yet. The step
+	// waits for these only.
 	minors    []string
 	launching int
+	// tenant are the kubelet minors of the nodes of every other pool (the
+	// tenant's), by pool: a warning, never waited for.
+	tenant map[string][]string
+}
+
+// platformPoolName reports whether a Karpenter pool is one of the
+// platform's: the platform pool, or the old platform pool while it exists.
+// Every other pool is the tenant's.
+func platformPoolName(pool string) bool {
+	return pool == crossplaneaws.PoolPlatform || pool == legacyPlatformPool
+}
+
+// tenantBehind are the tenant pools whose nodes run a kubelet minor other
+// than target's, as "<pool> (<minor>)", sorted.
+func (v kubeletView) tenantBehind(target string) []string {
+	var out []string
+	for pool, minors := range v.tenant {
+		for _, m := range minors {
+			if !sameMinor(m, target) {
+				out = append(out, fmt.Sprintf("%s (%s)", pool, m))
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // nodeGroupsResult is what a pass learned of the cluster's node groups.
 type nodeGroupsResult struct {
-	// removed are the statuses of the tenant groups a cluster had before
-	// the platform owned its node groups, DELETING while they are removed
+	// removed are the statuses an earlier build recorded for the tenant
+	// groups it was removing (DELETING), kept while a pass cannot look; a
+	// pass that reaches the cluster hands such pools over and drops them
 	// (removeNodeGroups).
 	removed []*cloudv1.NodeGroupStatus
 	// platformPool is the platform pool's status (PROP-03); nil: there is
@@ -216,10 +245,10 @@ func groupStatus(name string, platform bool, phase cloudv1.NodeGroupPhase, messa
 
 // reconcileNodeGroups applies the platform pool into the cluster's workload
 // cluster, reads its status and the system group's nodes into the pass
-// (nodeGroupsOfPass), and removes the Karpenter objects the platform
-// applied that it no longer renders: the tenant node groups of a cluster
-// built before the platform owned its node groups, and the old platform
-// pool once nothing needs it. It runs after the platform components, and only once the
+// (nodeGroupsOfPass), and acts on the Karpenter objects the platform
+// applied that it no longer renders: it hands over the tenant pools of a
+// cluster built before the platform owned its node groups, and removes the
+// old platform pool once nothing needs it. It runs after the platform components, and only once the
 // Karpenter component is READY: nothing is applied before. It never fails the pass:
 // what cannot be applied or read is the platform pool's status message, and a
 // status that cannot be read keeps its last good phase.
@@ -339,30 +368,22 @@ func (s *Reconciler) applyNodeGroups(ctx context.Context, row *model.Cluster, sp
 	nodes, kubelets := s.readNodesInto(ctx, c, extra.systemGroup, usage)
 	s.summarize(ctx, c, row, nodes)
 	legacy := &legacyPoolGate{s: s, c: c, row: row, installed: installed, extra: extra, nodes: nodes}
-	removing := s.removeNodeGroups(ctx, c, row, legacy, nodes)
+	s.removeNodeGroups(ctx, c, row, legacy, nodes)
 	out := &nodeGroupsResult{kubelets: kubelets, system: systemObserved{nodes: nodes.count[systemNodeGroup], counted: nodes.complete,
 		move: legacy.message}}
 	if s.platformPoolOn() {
 		out.platformPool = s.readPlatformPool(ctx, c, stored, failed[crossplaneaws.PoolPlatform], nodes)
 	}
-	for _, name := range removing {
-		out.removed = append(out.removed, groupStatus(name, false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING,
-			removedGroupMessage, nodes.count[name]))
-	}
 	// The per-node rows go to the results bucket; the status keeps counts and,
 	// when they cannot be stored, a notice.
 	attempted, notice := s.writeNodeRows(ctx, row, nodes)
-	withNodesNotice(out.removed, stored, attempted, notice)
 	out.system.notice, out.system.noticeSet = notice, attempted
 	if out.platformPool != nil {
+		withNodesNotice([]*cloudv1.NodeGroupStatus{out.platformPool}, stored, attempted, notice)
 		withAMINotice([]*cloudv1.NodeGroupStatus{out.platformPool}, extra.amiNotice)
 	}
 	return out
 }
-
-// removedGroupMessage is the status message of a tenant group being
-// removed: the platform owns a cluster's node groups now.
-const removedGroupMessage = "removed: the platform runs only its system group and platform pool now; Karpenter drains its nodes"
 
 // withAMINotice adds the AMI pin notice to the groups' messages.
 func withAMINotice(groups []*cloudv1.NodeGroupStatus, notice string) {
@@ -583,7 +604,7 @@ func (s *Reconciler) NodeGroupObjects(ctx context.Context, row *model.Cluster) (
 // default pin).
 func (s *Reconciler) nodeGroupsInput(ctx context.Context, row *model.Cluster, spec *cloudv1.ClusterSpec, release string) (crossplaneaws.KarpenterNodeGroupsInput, nodeGroupsExtra, error) {
 	in := crossplaneaws.KarpenterNodeGroupsInput{ClusterName: row.Name, ClusterPrefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name),
-		Discovery: true, PlatformPool: s.platformPoolInput()}
+		Discovery: true, PlatformPool: s.platformPoolInput(), Tags: crossplaneaws.KarpenterNodeTags(row.TenantID, row.ID, row.Name, row.Labels)}
 	var rel *cloudv1alpha1.Release
 	if src := s.releases(); src != nil && release != "" {
 		var err error
@@ -688,21 +709,21 @@ func nodeAMIMinor(specVersion string, stored *cloudv1.ClusterStatus) string {
 	return want
 }
 
-// removeNodeGroups deletes the NodePools and EC2NodeClasses the platform
-// applied but no longer renders (only objects with the managed-by label):
-// every one but the platform pool's, so the tenant groups of a cluster built
-// before the platform owned its node groups go. It returns the names still
-// there. Deleting a NodePool makes Karpenter drain and terminate its nodes. A pool goes before its class. The
-// objects of the old platform pool are left alone until legacy allows
-// (nothing changes them, nothing is reported as a group); then its pool is
-// deleted, and its class once its pool and its nodes are gone.
+// removeNodeGroups acts on the NodePools and EC2NodeClasses the platform
+// applied but no longer renders (only objects with the managed-by label).
+// The old platform pool is the platform's: its objects are left alone
+// until legacy allows (nothing changes them, nothing is reported as a
+// group); then its pool is deleted, and its class once its pool and its
+// nodes are gone (deleting a NodePool makes Karpenter drain and terminate
+// its nodes). Any other is a tenant pool an earlier build applied: tenants
+// own their pools, so it is handed over (handOverPools), never deleted.
 func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row *model.Cluster,
-	legacy *legacyPoolGate, nodes nodeCounts) []string {
+	legacy *legacyPoolGate, nodes nodeCounts) {
 	want := map[string]bool{}
 	if s.platformPoolOn() {
 		want[crossplaneaws.PoolPlatform] = true
 	}
-	var still []string
+	var tenant []*unstructured.Unstructured
 	pools := map[string]bool{}
 	for _, gvk := range []struct {
 		kind string
@@ -726,19 +747,16 @@ func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row 
 		for i := range list.Items {
 			obj := &list.Items[i]
 			name := obj.GetName()
-			if want[name] {
+			switch {
+			case want[name]:
 				continue
-			}
-			old := name == legacyPlatformPool
-			if old && !legacy.allowed(ctx) {
+			case name != legacyPlatformPool:
+				tenant = append(tenant, obj)
 				continue
-			}
-			if !gvk.pool && (pools[name] || (old && nodes.count[name] > 0)) {
-				if old {
-					legacy.message = fmt.Sprintf("removing the old platform pool: waiting for Karpenter to terminate its nodes (%d left)", max(nodes.count[name], 1))
-				} else {
-					still = appendOnce(still, name)
-				}
+			case !legacy.allowed(ctx):
+				continue
+			case !gvk.pool && (pools[name] || nodes.count[name] > 0):
+				legacy.message = fmt.Sprintf("removing the old platform pool: waiting for Karpenter to terminate its nodes (%d left)", max(nodes.count[name], 1))
 				continue // the class goes once its pool and nodes are gone
 			}
 			if gvk.pool {
@@ -747,14 +765,36 @@ func (s *Reconciler) removeNodeGroups(ctx context.Context, c client.Client, row 
 			if err := call(ctx, func(ctx context.Context) error { return client.IgnoreNotFound(c.Delete(ctx, obj)) }); err != nil {
 				s.logger().WarnContext(ctx, "node groups: delete", "cluster_id", row.ID, "object", objectRef(obj), "error", err)
 			}
-			if old {
-				legacy.message = "removing the old platform pool: waiting for Karpenter to terminate its nodes"
-			} else {
-				still = appendOnce(still, name)
-			}
+			legacy.message = "removing the old platform pool: waiting for Karpenter to terminate its nodes"
 		}
 	}
-	return still
+	s.handOverPools(ctx, c, row, tenant)
+}
+
+// handOverPools makes the tenant pools an earlier build applied (their
+// NodePools and EC2NodeClasses) the tenant's: the platform's managed-by
+// label is removed, so no pass lists, changes or deletes them again. What
+// runs on them is not touched (no drain). One event names the pools handed
+// over in this pass; an object that could not be written is tried again by
+// the next pass.
+func (s *Reconciler) handOverPools(ctx context.Context, c client.Client, row *model.Cluster, objects []*unstructured.Unstructured) {
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":{"`+crossplaneaws.LabelManagedBy+`":null}}}`))
+	var handed []string
+	for _, obj := range objects {
+		if err := call(ctx, func(ctx context.Context) error { return client.IgnoreNotFound(c.Patch(ctx, obj, patch)) }); err != nil {
+			s.logger().WarnContext(ctx, "node groups: hand over a tenant pool", "cluster_id", row.ID, "object", objectRef(obj), "error", err)
+			continue
+		}
+		handed = appendOnce(handed, obj.GetName())
+	}
+	if len(handed) == 0 {
+		return
+	}
+	slices.Sort(handed)
+	reconcile.AddNote(ctx, reconcile.Normal(reconcile.ReasonNodePoolsHandedOver, fmt.Sprintf(
+		"Karpenter pools %s, made by an earlier build, are the tenant's now: the platform no longer manages them; their nodes stay",
+		strings.Join(handed, ", "))))
+	s.logger().InfoContext(ctx, "node groups: tenant pools handed over", "cluster_id", row.ID, "pools", handed)
 }
 
 func appendOnce(list []string, name string) []string {

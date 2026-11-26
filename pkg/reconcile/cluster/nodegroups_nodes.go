@@ -59,11 +59,11 @@ func eachPage(ctx context.Context, c client.Client, gvk schema.GroupVersionKind,
 // minors, with paginated lists (limit 500 and continue, however many nodes
 // there are, bounded by the pass deadline); only counts are kept for the
 // status. The same reads collect the per-node rows (nodeCounts.rows): the
-// Karpenter nodes by pool, the default managed group's nodes as "system", each
+// Karpenter nodes by pool, any managed group's nodes as "system", each
 // joined with its NodeClaim. A failed or unfinished read is "not known", and
 // its rows are incomplete.
-func (s *Reconciler) readNodes(ctx context.Context, c client.Client, systemGroup string) (nodeCounts, kubeletView) {
-	return s.readNodesInto(ctx, c, systemGroup, nil)
+func (s *Reconciler) readNodes(ctx context.Context, c client.Client) (nodeCounts, kubeletView) {
+	return s.readNodesInto(ctx, c, "", nil)
 }
 
 // readNodesInto is readNodes that also sums the nodes into usage when it is
@@ -72,6 +72,7 @@ func (s *Reconciler) readNodesInto(ctx context.Context, c client.Client, systemG
 	counts := nodeCounts{count: map[string]int32{}, rows: map[string][]*cloudv1.NodeGroupNode{}, usage: usage}
 	view := kubeletView{}
 	minors := map[string]bool{}
+	tenantMinors := map[string]map[string]bool{}
 	byNode := map[string]*cloudv1.NodeGroupNode{}
 	nodeList := schema.GroupVersionKind{Version: "v1", Kind: "NodeList"}
 	err := eachPage(ctx, c, nodeList, func(items []unstructured.Unstructured) {
@@ -86,7 +87,15 @@ func (s *Reconciler) readNodesInto(ctx context.Context, c client.Client, systemG
 				usage.AddNodeObject(pool, n)
 			}
 			if v, _, _ := unstructured.NestedString(n.Object, "status", "nodeInfo", "kubeletVersion"); v != "" {
-				minors[kubernetesMinor(strings.TrimPrefix(v, "v"))] = true
+				minor := kubernetesMinor(strings.TrimPrefix(v, "v"))
+				switch {
+				case platformPoolName(pool):
+					minors[minor] = true
+				case tenantMinors[pool] == nil:
+					tenantMinors[pool] = map[string]bool{minor: true}
+				default:
+					tenantMinors[pool][minor] = true
+				}
 			}
 		}
 	}, client.HasLabels{crossplaneaws.KarpenterNodePoolLabel})
@@ -119,10 +128,21 @@ func (s *Reconciler) readNodesInto(ctx context.Context, c client.Client, systemG
 	for m := range minors {
 		view.minors = append(view.minors, m)
 	}
+	for pool, ms := range tenantMinors {
+		if view.tenant == nil {
+			view.tenant = map[string][]string{}
+		}
+		for m := range ms {
+			view.tenant[pool] = append(view.tenant[pool], m)
+		}
+	}
 	err = eachPage(ctx, c, crossplaneaws.KarpenterNodeClaimGVK.GroupVersion().WithKind("NodeClaimList"), func(items []unstructured.Unstructured) {
 		for i := range items {
 			name, _, _ := unstructured.NestedString(items[i].Object, "status", "nodeName")
-			if name == "" {
+			// A claim of a tenant pool launching does not hold the step;
+			// one without the pool label is counted.
+			pool, labelled := items[i].GetLabels()[crossplaneaws.KarpenterNodePoolLabel]
+			if name == "" && (!labelled || platformPoolName(pool)) {
 				view.launching++
 			} else if row := byNode[name]; row != nil {
 				clustersummary.ClaimInto(row, &items[i])

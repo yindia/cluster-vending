@@ -9,6 +9,7 @@ import (
 	awsevents "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchevents/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -186,8 +187,31 @@ func (s *Reconciler) releaseNodeRoleUsages(ctx context.Context, c *clusterRemova
 
 // nodeStageErrors is when each deleting cluster's workload API was first
 // not reachable in the node groups' stage, to end the wait after the
-// teardown timeout. A restart forgets it: the timeout then counts again.
+// teardown timeout. The status keeps it too (node_teardown), so a restart
+// does not count the timeout again; this is the process's copy, for a pass
+// whose status was not recorded.
 var nodeStageErrors sync.Map
+
+// nodeStageDownSince is when the node groups' stage first found the API
+// down: the earlier of the status's and the process's, at when neither has
+// it.
+func nodeStageDownSince(row *model.Cluster, at time.Time) time.Time {
+	first := at
+	if t := storedStatus(row).GetNodeTeardown().GetStartTime(); t != nil && t.AsTime().Before(first) {
+		first = t.AsTime()
+	}
+	if v, loaded := nodeStageErrors.LoadOrStore(row.ID, first); loaded && v.(time.Time).Before(first) {
+		first = v.(time.Time)
+	}
+	return first
+}
+
+// clearNodeStageClock forgets when the node groups' stage found the API
+// down, in the process and in the status.
+func clearNodeStageClock(ctx context.Context, id string) {
+	nodeStageErrors.Delete(id)
+	setNodeTeardown(ctx, nil)
+}
 
 // deleteNodeGroups is stage 4: in the workload cluster, Karpenter's
 // node pools (the users', and an old platform pool) are deleted, then what is
@@ -202,22 +226,24 @@ var nodeStageErrors sync.Map
 // The stage never fails the deletion: what goes wrong is its status message.
 func (s *Reconciler) deleteNodeGroups(ctx context.Context, row *model.Cluster, c *clusterRemoval, reachable bool) bool {
 	if s.deps.Teardowns == nil || !reachable || c.past() {
-		nodeStageErrors.Delete(row.ID)
+		clearNodeStageClock(ctx, row.ID)
 		return true
 	}
 	at := now()
 	step, err := s.stepNodeGroups(ctx, row)
 	if err != nil {
-		first, _ := nodeStageErrors.LoadOrStore(row.ID, at)
-		if at.Sub(first.(time.Time)) >= s.teardownTimeout() {
-			nodeStageErrors.Delete(row.ID)
+		first := nodeStageDownSince(row, at)
+		if at.Sub(first) >= s.teardownTimeout() {
+			clearNodeStageClock(ctx, row.ID)
 			return s.nodeStageTimedOut(ctx, row, "the cluster's API could not be reached: "+err.Error(), nil)
 		}
+		msg := "cannot reach the cluster's API: " + err.Error() + "; trying again"
+		setNodeTeardown(ctx, &cloudv1.ClusterTeardown{StartTime: timestamppb.New(first), Message: msg})
 		s.logger().WarnContext(ctx, "node groups teardown", "cluster_id", row.ID, "error", err)
-		setDeleteStage(ctx, stageNodeGroups, "cannot reach the cluster's API: "+err.Error()+"; trying again")
+		setDeleteStage(ctx, stageNodeGroups, msg)
 		return false
 	}
-	nodeStageErrors.Delete(row.ID)
+	clearNodeStageClock(ctx, row.ID)
 	if step.finished() {
 		return true
 	}
@@ -252,8 +278,8 @@ func (s *Reconciler) stepNodeGroups(ctx context.Context, row *model.Cluster) (te
 // nodeStageTimedOut ends the stage after the teardown timeout: the deletion
 // goes on, and a warning says what is still there.
 func (s *Reconciler) nodeStageTimedOut(ctx context.Context, row *model.Cluster, what string, left []reconcile.WorkloadObject) bool {
-	msg := fmt.Sprintf("node groups: timed out after %s (%s); going on: Karpenter's EC2 instances, launch templates and instance profiles "+
-		"may be left in the account; network delete then waits until they are deleted", s.teardownTimeout(), what)
+	msg := fmt.Sprintf("node groups: timed out after %s (%s); going on: the cloud sweep (stage %d) terminates Karpenter's EC2 instances "+
+		"and deletes its launch templates by the cluster's tags, and its instance profiles go before its node role", s.teardownTimeout(), what, stageKarpenter)
 	reconcile.AddNote(ctx, reconcile.Warning(reconcile.ReasonTeardownTimedOut, msg))
 	s.logger().WarnContext(ctx, "node groups teardown timed out", "cluster_id", row.ID, "left", refs(left))
 	return true

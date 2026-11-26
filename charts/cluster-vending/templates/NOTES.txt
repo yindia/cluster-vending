@@ -41,12 +41,28 @@ API for the CLI:
   curl -s http://localhost:8080/healthz
   bin/cluster-vending --server http://localhost:8080 tenant list
 {{- end }}
-{{- if or (not $auth.mode) (eq (toString $auth.mode) "none") }}
+{{- if .Values.allowInsecureNoAuth }}
 
-WARNING: platform.auth is not set (mode none): every caller is anonymous and
-may call every RPC for every tenant. Keep the Services internal, or set
-platform.auth (docs/architecture.md#authentication).
-{{- else if and .Values.ui.enabled (not .Values.ui.auth.enabled) (eq (toString $auth.mode) "required") }}
+##########################################################################
+#  INSECURE INSTALL: allowInsecureNoAuth is true. LOCAL/DEV ONLY.        #
+##########################################################################
+{{- if ne (toString (default "" $auth.mode)) "required" }}
+  platform.auth.mode is not required: every caller of the API is anonymous
+  and may call every RPC for every tenant: freeze the platform, delete any
+  tenant's clusters, read account external IDs.
+{{- if not .Values.networkPolicy.server.enabled }}
+  networkPolicy.server is off as well: every pod of the cluster can do so.
+{{- end }}
+{{- end }}
+{{- if and .Values.ui.enabled .Values.ui.ingress.enabled (not .Values.ui.auth.enabled) }}
+  ui.ingress is on without ui.auth: the console, and through it the API,
+  is published without login.
+{{- end }}
+  Never use this on a shared or internet-reachable cluster. Set
+  platform.auth and ui.auth (docs/architecture.md#authentication) and drop
+  allowInsecureNoAuth.
+{{- end }}
+{{- if and .Values.ui.enabled (not .Values.ui.auth.enabled) (eq (toString $auth.mode) "required") }}
 
 WARNING: platform.auth.mode is required but ui.auth.enabled is false: the
 console sends no token and the API refuses its calls. Turn ui.auth on.

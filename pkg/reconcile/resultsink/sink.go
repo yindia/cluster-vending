@@ -155,6 +155,7 @@ func (s *Sink) run(ctx context.Context, tenantID, clusterID string, kind results
 	defer cancel()
 	staged, why, err := s.stage(ctx, tenantID, clusterID, kind, now, summary, write)
 	if err != nil {
+		s.deps.Measure().ResultWriteFailed(string(kind))
 		s.logger.WarnContext(ctx, "scan result not written to the results bucket",
 			"tenant_id", tenantID, "cluster_id", clusterID, "kind", kind, "error", err)
 	}

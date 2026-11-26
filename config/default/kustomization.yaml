@@ -18,22 +18,22 @@ resources:
 - ../crd
 - ../rbac
 - ../manager
-# [PROMETHEUS] A ServiceMonitor; needs the metrics component below and the
-# Prometheus Operator's CRDs.
+# [PROMETHEUS] The ServiceMonitors (controller, API server) and the alerts
+# (PrometheusRule, docs/architecture.md#metrics-and-alerts). Needs the
+# Prometheus Operator's CRDs. The namespace and the name prefix above apply
+# to them; nothing else to edit.
 #- ../prometheus
 # [NETWORK POLICY] Restrict the metrics port to namespaces labelled
 # metrics=enabled.
 #- ../network-policy
 
-# [METRICS] Off by default, as the command's own default is. Uncomment to
-# serve them (plain HTTP, unauthenticated) on :8080 behind a Service.
-#components:
-#- ../metrics
-
+components:
+# [METRICS] On: the controller serves its metrics (plain HTTP,
+# unauthenticated) on :8080 behind a Service, for in-cluster scraping.
+- ../metrics
 # [NO IRSA] For a management cluster without IRSA: the providers
 # authenticate with AWS keys in a Secret you create, then assume the tenant
 # roles (see ../local-credentials). Not for production.
-#components:
 #- ../local-credentials
 
 # [IRSA] The controller's AWS access in production: the IAM role of its

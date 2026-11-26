@@ -36,7 +36,8 @@ func ClusterProto(row *model.Cluster, spec *cloudv1.ClusterSpec, st *cloudv1.Clu
 func (s *Reconciler) remember(ctx context.Context, row *model.Cluster, st *cloudv1.ClusterStatus) error {
 	before := storedStatus(row)
 	notes := happened(ctx, before, st)
-	st.RecentEvents = reconcile.Recent(before.GetRecentEvents(), notes, now())
+	at := now()
+	st.RecentEvents = reconcile.Recent(before.GetRecentEvents(), notes, at)
 	raw, err := Encode(st)
 	if err != nil {
 		return err
@@ -51,6 +52,7 @@ func (s *Reconciler) remember(ctx context.Context, row *model.Cluster, st *cloud
 	if err == nil {
 		row.Status = raw
 		s.emit(ctx, row, notes)
+		measure(s.deps.Measure(), row, before, st, at)
 	}
 	return err
 }

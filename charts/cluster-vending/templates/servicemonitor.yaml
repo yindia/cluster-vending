@@ -1,0 +1,49 @@
+{{- /*
+Prometheus Operator ServiceMonitors (metrics.serviceMonitor.enabled): the API
+server's /metrics on its API port, the controller's metrics Service and the
+live reader's metrics port. Each target is labelled cluster_vending_role, which
+the alerts (prometheusrule.yaml) select on, as config/prometheus does.
+*/ -}}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+{{- $sm := .Values.metrics.serviceMonitor }}
+{{- $targets := list }}
+{{- if .Values.server.enabled }}
+{{- $targets = append $targets (dict "component" "server" "port" "http") }}
+{{- end }}
+{{- if and .Values.controller.enabled .Values.controller.metrics.enabled }}
+{{- $targets = append $targets (dict "component" "controller" "port" "metrics") }}
+{{- end }}
+{{- if and .Values.live.enabled .Values.live.metrics.enabled }}
+{{- $targets = append $targets (dict "component" "live" "port" "metrics") }}
+{{- end }}
+{{- range $targets }}
+{{- $ctx := dict "root" $ "component" .component }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+    {{- with $sm.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  endpoints:
+  - path: /metrics
+    port: {{ .port }}
+    scheme: http
+    interval: {{ $sm.interval }}
+    scrapeTimeout: {{ $sm.scrapeTimeout }}
+    relabelings:
+    - targetLabel: cluster_vending_role
+      replacement: {{ .component }}
+  namespaceSelector:
+    matchNames:
+    - {{ $.Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "cv.selectorLabels" $ctx | nindent 6 }}
+{{- end }}
+{{- end }}

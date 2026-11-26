@@ -8,10 +8,13 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloud "github.com/yindia/cluster-vending/api/v1alpha1"
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
 const FleetInterval = 30 * time.Second
@@ -31,7 +34,7 @@ func NewFleet(reader client.Reader) *Fleet {
 	f.define("fleet_resources", "Owners by observed lifecycle phase (not individual cloud resources).", "kind", "phase")
 	f.define("fleet_cluster_configuration", "Clusters by effective channel, inherited network tier and upgrade mode.", "channel", "tier", "mode")
 	f.define("fleet_inventory_resources", "Recorded inventory references; includes Usages and references to resources not yet observed.", "owner_kind")
-	f.define("fleet_conditions", "Owners by Ready or Synced condition status; absent conditions are unknown.", "kind", "condition", "status")
+	f.define("fleet_conditions", "Owners by condition status: Ready and Synced on every kind, Reachable on clusters, AccessVerified on accounts; absent conditions are unknown.", "kind", "condition", "status")
 	f.define("fleet_generation_pending", "Owners whose status has not observed the latest Kubernetes generation.", "kind")
 	f.define("fleet_oldest_provisioning_seconds", "Age since creation of the oldest owner still in Provisioning; zero when none.", "kind")
 	f.define("fleet_frozen_resources", "Owners whose observed Frozen condition is true.", "kind")
@@ -49,6 +52,7 @@ func NewFleet(reader client.Reader) *Fleet {
 	f.define("fleet_metrics_last_success_timestamp_seconds", "Unix time of the last successful fleet snapshot refresh; zero before the first.")
 	f.define("fleet_metrics_refresh_errors_total", "Failed fleet snapshot refresh attempts; previous snapshot is retained.")
 	f.define("fleet_metrics_refresh_duration_seconds", "Duration of the latest fleet snapshot refresh attempt.")
+	f.defineState()
 	return f
 }
 
@@ -104,7 +108,23 @@ func (f *Fleet) Start(ctx context.Context) error {
 
 type series struct{ name, labels string }
 
-type snapshotBuilder struct{ values map[series]float64 }
+type snapshotBuilder struct {
+	values map[series]float64
+	// seen are the distinct values of the data-derived labels (bounded).
+	seen map[string]map[string]bool
+}
+
+// conditionsOf are the conditions fleet_conditions counts for kind.
+func conditionsOf(kind string) []string {
+	switch kind {
+	case "cluster":
+		return []string{"Ready", "Synced", cloud.ConditionReachable}
+	case "cloudaccount":
+		return []string{"Ready", "Synced", "AccessVerified"}
+	default:
+		return []string{"Ready", "Synced"}
+	}
+}
 
 func (b snapshotBuilder) add(name string, value float64, labels ...string) {
 	b.values[series{name, strings.Join(labels, "\x00")}] += value
@@ -160,7 +180,7 @@ func (b snapshotBuilder) owner(kind, state string, object metav1.Object, observe
 		b.oldest("fleet_oldest_provisioning_seconds", age(now, &created), kind)
 	}
 	b.add("fleet_frozen_resources", 0, kind)
-	for _, name := range []string{"Ready", "Synced"} {
+	for _, name := range conditionsOf(kind) {
 		status := "unknown"
 		for _, condition := range conditions {
 			if condition.Type == name {
@@ -197,20 +217,31 @@ func (f *Fleet) Refresh(ctx context.Context, now time.Time) (err error) {
 		}
 	}()
 	accounts, networks, clusters, components, holds := &cloud.CloudAccountList{}, &cloud.NetworkList{}, &cloud.ClusterList{}, &cloud.ComponentList{}, &cloud.ReleaseHoldList{}
-	for _, list := range []client.ObjectList{accounts, networks, clusters, components, holds} {
+	channels, definitions := &cloud.ReleaseChannelList{}, &cloud.ComponentDefinitionList{}
+	for _, list := range []client.ObjectList{accounts, networks, clusters, components, holds, channels, definitions} {
 		if err := f.reader.List(ctx, list); err != nil {
 			return fmt.Errorf("fleet metrics: %w", err)
 		}
 	}
-	b := snapshotBuilder{values: map[series]float64{}}
+	releases := &unstructured.UnstructuredList{}
+	releases.SetGroupVersionKind(crossplaneaws.HelmReleaseGVK.GroupVersion().WithKind(crossplaneaws.HelmReleaseGVK.Kind + "List"))
+	if err := f.reader.List(ctx, releases); err != nil && !meta.IsNoMatchError(err) {
+		return fmt.Errorf("fleet metrics: helm releases: %w", err)
+	}
+	catalog := map[string]bool{}
+	for _, d := range definitions.Items {
+		catalog[d.Name] = true
+	}
+	b := snapshotBuilder{values: map[series]float64{}, seen: map[string]map[string]bool{}}
+	b.stateZeros()
 	// Stable zero series make empty fleets and removed owners observable.
 	for _, kind := range []string{"cloudaccount", "network", "cluster", "component"} {
 		for _, state := range []string{"unknown", "bootstrapping", "provisioning", "pending", "installing", "running", "ready", "updating", "imported", "blocked", "failed", "degraded", "deleting"} {
 			b.add("fleet_resources", 0, kind, state)
 		}
-		for _, name := range []string{"ready", "synced"} {
+		for _, name := range conditionsOf(kind) {
 			for _, status := range []string{"true", "false", "unknown"} {
-				b.add("fleet_conditions", 0, kind, name, status)
+				b.add("fleet_conditions", 0, kind, strings.ToLower(name), status)
 			}
 		}
 		for _, metric := range []string{"fleet_inventory_resources", "fleet_generation_pending", "fleet_oldest_provisioning_seconds", "fleet_frozen_resources"} {
@@ -244,12 +275,15 @@ func (f *Fleet) Refresh(ctx context.Context, now time.Time) (err error) {
 	}
 	for _, account := range accounts.Items {
 		b.owner("cloudaccount", string(account.Status.Phase), &account, account.Status.ObservedGeneration, account.Status.Conditions, len(account.Status.Inventory), now)
+		b.deleting("cloudaccount", "resources", &account, now)
 	}
 	tiers := map[client.ObjectKey]cloud.ClusterTier{}
 	for _, network := range networks.Items {
 		tiers[client.ObjectKeyFromObject(&network)] = network.Spec.Tier
 		b.owner("network", string(network.Status.Phase), &network, network.Status.ObservedGeneration, network.Status.Conditions, len(network.Status.Inventory), now)
 		b.code("network", network.Status.CodeChange)
+		b.deleting("network", "resources", &network, now)
+		b.managed("network", readContract(network.Status.ContractStatus))
 	}
 	for _, cluster := range clusters.Items {
 		b.owner("cluster", string(cluster.Status.Phase), &cluster, cluster.Status.ObservedGeneration, cluster.Status.Conditions, len(cluster.Status.Inventory), now)
@@ -266,6 +300,7 @@ func (f *Fleet) Refresh(ctx context.Context, now time.Time) (err error) {
 		}
 		ch := channel(cluster)
 		b.add("fleet_cluster_configuration", 1, ch, tier, label(string(mode), "Manual", "Automatic"))
+		b.clusterState(&cluster, ch, catalog, now)
 		b.add("fleet_inventory_resources", float64(len(cluster.Status.ComponentInventory)), "platform_component")
 		if upgrade := cluster.Status.Upgrade; upgrade != nil {
 			p := label(string(upgrade.Phase), "ControlPlane", "NodesAndAddons", "NodeGroups", "Addons", "PlatformComponents", "TenantComponents")
@@ -287,6 +322,13 @@ func (f *Fleet) Refresh(ctx context.Context, now time.Time) (err error) {
 	for _, component := range components.Items {
 		b.owner("component", component.Status.Phase, &component, component.Status.ObservedGeneration, component.Status.Conditions, len(component.Status.Inventory), now)
 		b.add("fleet_components", 1, "tenant", phase(component.Status.Phase))
+		b.tenantComponent(&component, catalog, now)
+	}
+	for i := range channels.Items {
+		b.channel(&channels.Items[i])
+	}
+	for i := range releases.Items {
+		b.helmRelease(&releases.Items[i], now)
 	}
 	for _, hold := range holds.Items {
 		if hold.Name != "platform-freeze" || !hold.Spec.Platform {

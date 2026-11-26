@@ -8,6 +8,7 @@ import (
 	"time"
 
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
+	awsiam "github.com/upbound/provider-aws/v2/apis/namespaced/iam/v1beta1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -138,7 +139,8 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 		return nil, fault.New(fault.Unavailable, "cannot read the cluster architecture from the management cluster")
 	}
 
-	if err := s.observeEKS(ctx, records, st); err != nil {
+	nodeRole := crossplaneaws.KarpenterNodeRoleName(crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name))
+	if err := s.observeEKS(ctx, records, st, nodeRole); err != nil {
 		s.logger().ErrorContext(ctx, "observe eks", "cluster_id", row.ID, "error", err)
 		return nil, fault.New(fault.Unavailable, "cannot read the cluster from the management cluster")
 	}
@@ -156,8 +158,10 @@ func (s *Reconciler) viewOf(ctx context.Context, row *model.Cluster, records []m
 	return ClusterProto(row, spec, st), nil
 }
 
-// observeEKS copies what the EKS Cluster and NodeGroup report into st.
-func (s *Reconciler) observeEKS(ctx context.Context, records []model.ManagedResource, st *cloudv1.ClusterStatus) error {
+// observeEKS copies what the EKS Cluster and NodeGroup report into st, and
+// Karpenter's node role (the Role object named nodeRole) once it is Ready:
+// what a tenant's own EC2NodeClass names.
+func (s *Reconciler) observeEKS(ctx context.Context, records []model.ManagedResource, st *cloudv1.ClusterStatus, nodeRole string) error {
 	aws := &cloudv1.AwsClusterStatus{}
 	views := make(map[string]*cloudv1.ManagedResource, len(st.GetManagedResources()))
 	for _, v := range st.GetManagedResources() {
@@ -175,6 +179,17 @@ func (s *Reconciler) observeEKS(ctx context.Context, records []model.ManagedReso
 		case "ClusterAuth":
 			if views[r.Kind+"/"+r.Name].GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
 				st.KubeconfigSecret = r.Namespace + "/" + kubeconfigSecret(r.Name)
+			}
+		case "Role":
+			if r.Name != nodeRole || views[r.Kind+"/"+r.Name].GetState() != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
+				continue
+			}
+			role := &awsiam.Role{}
+			if err := s.getIgnoreMissing(ctx, key, role); err != nil {
+				return err
+			}
+			if arn := deref(role.Status.AtProvider.Arn); arn != "" {
+				aws.KarpenterNodeRole, aws.KarpenterNodeRoleArn = arn[strings.LastIndex(arn, "/")+1:], arn
 			}
 		case "NodeGroup":
 			ng := &awseks.NodeGroup{}

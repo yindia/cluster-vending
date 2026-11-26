@@ -5,8 +5,8 @@ Runs the platform in a management cluster from one values file:
 | Workload | Command | Port | Probes | Service account | AWS |
 |---|---|---|---|---|---|
 | API server | `cluster-vending serve` | 8080 (Connect, gRPC, gRPC-Web, `/metrics`) | `/healthz` (liveness, startup), `/readyz` | `<fullname>-server` | optional IRSA: its own server role (`aws.serverRoleArn`), to read results buckets |
-| controller | `cluster-vending controller` | 8081 (probes), 8080 metrics if enabled | `/healthz`, `/readyz` on 8081 | `<fullname>-controller` | IRSA: the management role (`aws.managementRoleArn`) |
-| live reader | `cluster-vending live` | 8090 (internal) | `/healthz`, `/readyz` | `cluster-vending-live` (fixed) | none |
+| controller | `cluster-vending controller` | 8081 (probes), 8080 metrics (`controller.metrics`, on) | `/healthz`, `/readyz` on 8081 | `<fullname>-controller` | IRSA: the management role (`aws.managementRoleArn`) |
+| live reader | `cluster-vending live` | 8090 (internal), 8091 `/metrics` only (`live.metrics`, on) | `/healthz`, `/readyz` | `cluster-vending-live` (fixed) | none |
 | console | `node server.js` (ui/) | 3000 | TCP (liveness), `/favicon.ico` (readiness) | `<fullname>-ui`, no token | none |
 
 `<fullname>` is the release name when it contains `cluster-vending`, else
@@ -34,12 +34,29 @@ The kustomize manifests in `config/` are the reference this chart follows;
 
 ## Install
 
+The API's login is required: the chart refuses to render without
+`platform.auth.mode: required` (start from [ci/auth-values.yaml](ci/auth-values.yaml)
+and put your issuer and audience in it):
+
 ```sh
 helm install cluster-vending charts/cluster-vending \
   -n cluster-vending-system --create-namespace \
+  -f my-auth-values.yaml \
   --set aws.managementRoleArn=arn:aws:iam::111122223333:role/crossplane-provider-aws \
   --set controller.serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::111122223333:role/crossplane-provider-aws
 ```
+
+**Login is not optional.** The render fails when:
+
+- `server.enabled` and `platform.auth.mode` is not `required`: every caller of the
+  API would be anonymous and could call every RPC for every tenant (freeze the
+  platform, delete any cluster, read account external IDs);
+- `ui.ingress.enabled` and `ui.auth.enabled` is false: the Ingress would publish the
+  console, and through it the API, without login.
+
+`allowInsecureNoAuth: true` lifts both checks. It is for **local/dev clusters only**
+(`ci/kind-values.yaml` sets it); NOTES.txt then prints a warning of what is open.
+It is a chart value only and never reaches the settings file.
 
 The management role template
 (`pkg/cloudformation/templates/cluster-vending-management-role.template.yaml`) trusts
@@ -81,8 +98,9 @@ kubectl -n cluster-vending-system port-forward svc/cluster-vending-server 8080:8
 bin/cluster-vending --server http://localhost:8080 tenant list
 ```
 
-A port-forward enters the pod's network namespace, so the network policies do
-not block it.
+A port-forward enters the pod's network namespace (the kubelet connects to the
+pod's loopback), so the network policies do not block it: the API server's
+policy, on by default, leaves this path open.
 
 The console's RPC route refuses a request whose `Origin` is not its own. With
 login off, it accepts only a loopback host the browser addressed (`localhost`,
@@ -116,7 +134,11 @@ The full list with comments is [values.yaml](values.yaml), and
 | `server.replicas` | `1` | More replicas serve the API |
 | `controller.replicas`, `controller.leaderElect` | `1`, `true` | More than one replica needs leader election (the chart refuses otherwise) |
 | `controller.installProviders`, `controller.installCatalog` | `true` | `--install-providers`, `--install-catalog` |
-| `controller.metrics.enabled` | `false` | Metrics on :8080 and a `<fullname>-controller-metrics` Service |
+| `controller.metrics.enabled` | `true` | Metrics on :8080 and a `<fullname>-controller-metrics` Service |
+| `live.metrics.enabled`, `.port` | `true`, `8091` | The live reader's `/metrics` on a port of its own (`CV_LIVE_METRICS_ADDR`), so a scraper never reaches its internal endpoint |
+| `metrics.serviceMonitor.enabled`, `.labels`, `.interval` | off | Prometheus Operator ServiceMonitors for the API server, the controller and the live reader |
+| `metrics.prometheusRule.enabled`, `.labels` | off | The platform's alerts (`files/prometheus-rules.yaml`, a copy of `config/prometheus/rules.yaml`), each with a `runbook_url` |
+| `networkPolicy.metricsFrom` | namespaces labelled `metrics=enabled` | Who reaches the live reader's metrics port, and the controller's with `networkPolicy.controllerMetrics` |
 | `live.*` | | Always one replica, strategy `Recreate`; no `replicas` value |
 | `ui.apiBaseUrl` | the server Service | `CV_API_BASE_URL`, the console's upstream |
 | `ui.auth.enabled`, `.url`, `.issuer`, `.clientId`, `.existingSecret` | off | Web login. The Secret holds `KEYCLOAK_CLIENT_SECRET` and `AUTH_SECRET`. |
@@ -124,7 +146,8 @@ The full list with comments is [values.yaml](values.yaml), and
 | `<workload>.serviceAccount.annotations` | none | IRSA. The live reader's may not carry a role (the chart refuses one). |
 | `<workload>.resources`, `.nodeSelector`, `.tolerations`, `.affinity`, `.podSecurityContext`, `.securityContext`, probes | as `config/` | Every container runs non-root with a read-only root filesystem and no capabilities |
 | `networkPolicy.live` | `true` | The live reader accepts the API server's pods only, as `config/live` |
-| `networkPolicy.server.enabled`, `.from` | off | The API accepts the console's pods and the listed peers |
+| `allowInsecureNoAuth` | `false` | **Local/dev only.** Render without `platform.auth.mode: required`, and a console Ingress without `ui.auth` |
+| `networkPolicy.server.enabled`, `.from` | **on**, none | The API accepts the console's pods and the listed peers only. List an ingress controller, in-cluster CLI users or Prometheus (it scrapes `/metrics` on 8080) in `from`. |
 | `networkPolicy.ui.enabled`, `.from` | off | The console accepts the listed peers (an ingress controller) |
 | `rbac.userRoles` | `true` | The helper ClusterRoles for people (cluster, network, cloud account admin/editor/viewer, release admin/viewer) |
 
@@ -142,9 +165,9 @@ of it.
 Never put a secret in `platform`: Secrets are referenced by name, e.g.
 `provider-credentials-secret: crossplane-system/aws-local-credentials`.
 
-Authentication of the API is `platform.auth`. Without it the API runs with
-mode `none`: every caller is anonymous and may call everything. NOTES.txt
-warns about that.
+Authentication of the API is `platform.auth`, and it must be `mode: required`
+(see Install). Mode `none`, where every caller is anonymous and may call
+everything, renders only with `allowInsecureNoAuth`.
 
 ## RBAC
 
@@ -169,7 +192,9 @@ make docker-build docker-build-ui TAG=dev
 make kind-load helm-install-kind TAG=dev   # HELM_KIND_CLUSTER=cv-helm
 ```
 
-`ci/kind-values.yaml` sets a placeholder management role. Kind has no IRSA: the
+`ci/kind-values.yaml` sets a placeholder management role and
+`allowInsecureNoAuth: true` (the API runs without login, for this local test
+only). Kind has no IRSA: the
 controller installs the CRDs, providers and catalog, and its AWS calls fail
 until credentials are given (docs/local-development.md). The API, the live
 reader and the console work without them.

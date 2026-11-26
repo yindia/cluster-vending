@@ -36,6 +36,10 @@ type ResultsS3 func(a awscloud.Access, region string) (results.S3API, error)
 // profiles, as its tenant role, in a region.
 type InstanceProfiles func(a awscloud.Access, region string) (awscloud.InstanceProfileAPI, error)
 
+// CloudSweep makes the EC2 and ELBv2 clients that reach an account, as its
+// tenant role, in a region.
+type CloudSweep func(a awscloud.Access, region string) (awscloud.SweepAPI, error)
+
 type Deps struct {
 	// ManagedResourceKinds lists the managed kinds supplied by active provider adapters.
 	// Nil preserves the current AWS installation; a future GCP adapter can
@@ -81,6 +85,12 @@ type Deps struct {
 	// takes Karpenter's node role out of the instance profiles Karpenter
 	// made, before it deletes the role. Nil: none is removed (tests).
 	InstanceProfiles InstanceProfiles
+	// CloudSweep makes the clients with which a cluster's deletion finds,
+	// by the cluster's tags, and deletes what its controllers left in the
+	// account (Karpenter's instances and launch templates, the load balancer
+	// controller's load balancers, target groups and security groups).
+	// Nil: nothing is swept (tests).
+	CloudSweep CloudSweep
 	// ProviderCredentials, when set, is the Secret every account's
 	// ProviderConfig authenticates the Crossplane AWS providers with,
 	// instead of IRSA (a management cluster without IRSA, such as a local
@@ -162,7 +172,9 @@ type Deps struct {
 	// reported as Kubernetes events (events.go). Only what reconciles has
 	// it; nil emits nothing.
 	Events Events
-	Logger *slog.Logger
+	// Metrics measures the transitions (metrics.go); nil measures nothing.
+	Metrics Metrics
+	Logger  *slog.Logger
 }
 
 // KubeconfigReaderRole is the ClusterRole (config/rbac) that may get

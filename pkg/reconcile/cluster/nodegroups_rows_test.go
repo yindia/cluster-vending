@@ -146,11 +146,10 @@ func TestNodeRowsAreCollectedPerGroupAndWritten(t *testing.T) {
 
 	res := rw.pass(t)
 
-	// Counts stay in the CR; no per-node rows.
-	require.Equal(t, int32(3), statusOf(res, "gpu").GetNodes(), "the count stays in the status")
-	for _, g := range res.removed {
-		require.Empty(t, g.GetNodesNotice())
-	}
+	// No per-node rows in the CR. The tenant's pool is not a group of the
+	// status (it is the tenant's, handed over); its nodes are rows like any.
+	require.Nil(t, statusOf(res, "gpu"), "a tenant pool is not in the status")
+	require.Empty(t, res.removed)
 	idx := rw.index(t)
 	require.True(t, idx.GetComplete())
 	var names []string
@@ -258,13 +257,12 @@ func TestUnchangedNodeRowsRefreshTheSummaryTimeSlowly(t *testing.T) {
 }
 
 func TestNodeRowsNeedingNoS3AreSilent(t *testing.T) {
-	fw := newFakeWorkload(interceptor.Funcs{}, append(tenantGroup("gpu"), karpenterNode("a", "gpu", true))...)
+	fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", platformPool, true))
 	w, _ := nodeGroupWorld(t, fw) // no ResultsS3: a test, or a controller with no AWS
+	withPlatformPool(w)
 	res := passOf(w, w.cluster(t), karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
-	require.Equal(t, int32(1), statusOf(res, "gpu").GetNodes())
-	for _, g := range res.removed {
-		require.Empty(t, g.GetNodesNotice())
-	}
+	require.Equal(t, int32(1), statusOf(res, platformPool).GetNodes())
+	require.Empty(t, statusOf(res, platformPool).GetNodesNotice())
 }
 
 // When S3 cannot be written the pass still succeeds: counts are in the CR,
@@ -284,16 +282,16 @@ func TestNodeRowsWhenS3IsUnavailable(t *testing.T) {
 		}, "writing to the results bucket failed"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			fw := newFakeWorkload(interceptor.Funcs{}, append(tenantGroup("gpu"), karpenterNode("a", "platform", true), karpenterNode("b", "gpu", true))...)
+			fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", "platform", true), karpenterNode("b", platformPool, true))
 			rw := newRowsWorld(t, fw, tt.ready)
+			withPlatformPool(rw.world)
 			rw.s3.Fail = tt.fail
 
 			res := rw.pass(t)
 
-			require.Equal(t, int32(1), statusOf(res, "gpu").GetNodes(), "counts are still there")
-			for _, g := range res.removed {
-				require.Equal(t, "the node list is unavailable: "+tt.notice, g.GetNodesNotice(), g.GetName())
-			}
+			pool := statusOf(res, platformPool)
+			require.Equal(t, int32(1), pool.GetNodes(), "counts are still there")
+			require.Equal(t, "the node list is unavailable: "+tt.notice, pool.GetNodesNotice())
 			require.Nil(t, rw.cluster(t).ResultRef("nodes"))
 			require.Empty(t, rw.s3.Keys(rw.bucket))
 		})
@@ -302,17 +300,18 @@ func TestNodeRowsWhenS3IsUnavailable(t *testing.T) {
 
 // A throttled pass keeps the notice of the last attempt.
 func TestThrottledPassKeepsTheNodesNotice(t *testing.T) {
-	fw := newFakeWorkload(interceptor.Funcs{}, append(tenantGroup("gpu"), karpenterNode("a", "gpu", true))...)
+	fw := newFakeWorkload(interceptor.Funcs{}, karpenterNode("a", platformPool, true))
 	rw := newRowsWorld(t, fw, false)
+	withPlatformPool(rw.world)
 	first := rw.pass(t)
-	require.NotEmpty(t, statusOf(first, "gpu").GetNodesNotice())
+	require.NotEmpty(t, statusOf(first, platformPool).GetNodesNotice())
 	require.True(t, first.system.noticeSet && first.system.notice != "", "the system group's status carries it too")
 	// The recorded status is what the next pass starts from.
-	st := &cloudv1.ClusterStatus{NodeGroups: first.removed}
+	st := &cloudv1.ClusterStatus{NodeGroups: []*cloudv1.NodeGroupStatus{first.platformPool}}
 	rw.rememberStatus(t, st)
 	rw.at(10 * time.Second)
 	second := rw.pass(t)
-	require.Equal(t, statusOf(first, "gpu").GetNodesNotice(), statusOf(second, "gpu").GetNodesNotice())
+	require.Equal(t, statusOf(first, platformPool).GetNodesNotice(), statusOf(second, platformPool).GetNodesNotice())
 }
 
 // Reading is paginated, so 1,200 nodes of one group are 1,200 rows of one
@@ -341,7 +340,7 @@ func TestNodeRowsOfAnUnfinishedReadAreIncomplete(t *testing.T) {
 	}))
 	rw := newRowsWorld(t, fw, true)
 	// The pass's own deadline ends the read; S3 writes use a fresh context.
-	nodes, _ := rw.svc.readNodes(ctx, fw.c, "")
+	nodes, _ := rw.svc.readNodes(ctx, fw.c)
 	require.False(t, nodes.complete)
 	require.NotEmpty(t, nodes.rows["platform"])
 	require.Less(t, len(nodes.rows["platform"]), 1200)

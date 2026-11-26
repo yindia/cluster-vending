@@ -205,3 +205,25 @@ func TestNoS3MeansNothingWrittenAndNoNotice(t *testing.T) {
 	require.Empty(t, notice)
 	require.Empty(t, w.s3.Keys(w.bucket))
 }
+
+// failures counts ResultWriteFailed by kind (reconcile.Metrics).
+type failures struct{ kinds []string }
+
+func (*failures) ClusterProvisioned(time.Duration)     {}
+func (*failures) UpgradeFinished(time.Duration)        {}
+func (*failures) ComponentReady(string, time.Duration) {}
+func (f *failures) ResultWriteFailed(kind string)      { f.kinds = append(f.kinds, kind) }
+
+func TestAFailedWriteIsCountedByKind(t *testing.T) {
+	w := newWorld(t, false)
+	w.bucketObject(t, true)
+	m := &failures{}
+	w.deps.Metrics = m
+	w.sink = resultsink.New(w.deps, nil)
+	w.s3.Fail = func(op, _, _ string) error { return errors.New("boom") }
+
+	_, notice := w.sink.Stage(t.Context(), tenant, clusterID, results.Deprecations, scan(1), now, model.ResultRef{})
+
+	require.NotEmpty(t, notice)
+	require.Equal(t, []string{"deprecations"}, m.kinds)
+}

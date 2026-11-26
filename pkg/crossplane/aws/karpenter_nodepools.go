@@ -53,6 +53,10 @@ type KarpenterNodeGroupsInput struct {
 	// a pool named PoolPlatform, the only Karpenter group a cluster has.
 	// Nil: nothing is rendered.
 	PlatformPool *PlatformPoolInput
+	// Tags are the EC2NodeClass's spec.tags (KarpenterNodeTags): on every
+	// instance, volume and launch template Karpenter makes from it. Empty:
+	// none.
+	Tags map[string]string
 }
 
 // KarpenterNodeGroupObjects are the cluster's Karpenter objects, exactly
@@ -90,6 +94,9 @@ func renderNodeClassWith(in KarpenterNodeGroupsInput, name string, maxPods int) 
 	}}}
 	if maxPods > 0 {
 		_ = unstructured.SetNestedField(u.Object, map[string]any{"maxPods": int64(maxPods)}, "spec", "kubelet")
+	}
+	if tags := nodeClassTags(in.Tags); tags != nil {
+		_ = unstructured.SetNestedField(u.Object, tags, "spec", "tags")
 	}
 	u.SetGroupVersionKind(KarpenterNodeClassGVK)
 	u.SetName(name)

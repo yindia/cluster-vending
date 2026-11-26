@@ -114,7 +114,12 @@ func newServeCmd(g *globals) *cobra.Command {
 				}
 			}()
 			g.logger.Info("authentication", "mode", authCfg.Mode, "issuers", len(authCfg.Issuers))
-			if authCfg.Mode == auth.ModeNone {
+			if server.ExposedWithoutAuth(authCfg.Mode, ln.Addr()) {
+				g.logger.Warn("INSECURE: authentication is off (auth.mode none) and the API listens on a non-loopback address: "+
+					"anyone who can reach it can freeze the platform, delete any tenant's clusters and read account external IDs; "+
+					"set auth.mode required (docs/architecture.md#authentication), or listen on 127.0.0.1 for local development",
+					"addr", ln.Addr().String())
+			} else if authCfg.Mode == auth.ModeNone {
 				g.logger.Warn("authentication is off (auth.mode none): every caller has full access to every tenant; for local development only")
 			}
 			for _, ignored := range authCfg.Ignored {

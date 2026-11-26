@@ -37,6 +37,10 @@ import (
 	"github.com/yindia/cluster-vending/pkg/telemetry"
 )
 
+// transitions are the controller's event counts and transition durations,
+// registered once with the manager's metrics.
+var transitions = telemetry.NewController(ctrlmetrics.Registry)
+
 // leaseName is the leader election Lease of the controller: not the API
 // server's, so both can run.
 const leaseName = "controller.cloud.cluster-vending.io"
@@ -232,7 +236,10 @@ func Run(ctx context.Context, o Options) error {
 	checkCredentialsSecret(ctx, reconciling, logger)
 	// What happens to accounts, networks, clusters and releases is also a
 	// Kubernetes event of the object (docs/architecture.md#events-and-conditions).
-	reconciling.Events = reconcilers.NewEvents(mgr.GetEventRecorder(reconcilers.EventsName), mgr.GetClient())
+	// Every event is also counted, and the long transitions timed
+	// (docs/architecture.md#metrics-and-alerts).
+	reconciling.Events = reconcilers.NewEvents(mgr.GetEventRecorder(reconcilers.EventsName), mgr.GetClient()).Counted(transitions)
+	reconciling.Metrics = transitions
 	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers, AutomaticUpgrades: o.AutomaticUpgrades,
 		UpgradeTimeout: o.UpgradeTimeout}
 	if err := Setup(mgr, deps); err != nil {

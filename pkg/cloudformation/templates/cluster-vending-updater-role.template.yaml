@@ -18,7 +18,7 @@ Outputs:
     Value: !Ref 'Role'
   TemplateVersion:
     Description: 'The version of this template: the platform compares it with what it needs and says when the stack is to be updated'
-    Value: '1'
+    Value: '2'
 Parameters:
   ExternalId:
     AllowedPattern: ^$|^[A-Za-z0-9+=,.@:/_-]{32,1224}$
@@ -184,7 +184,7 @@ Resources:
         - Key: cluster-vending.io/role
           Value: updater
         - Key: cluster-vending.io/template-version
-          Value: '1'
+          Value: '2'
         - Key: managed-by
           Value: cluster-vending
     Type: AWS::IAM::Role

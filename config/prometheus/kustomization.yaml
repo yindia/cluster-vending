@@ -1,4 +1,5 @@
 resources:
 - monitor.yaml
 - server-monitor.yaml
+- live-monitor.yaml
 - rules.yaml

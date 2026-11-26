@@ -1,0 +1,19 @@
+{{- /*
+The platform's alerts (metrics.prometheusRule.enabled): files/prometheus-rules.yaml,
+the rule groups of config/prometheus/rules.yaml (make helm-sync copies them).
+*/ -}}
+{{- if .Values.metrics.prometheusRule.enabled }}
+{{- $ctx := dict "root" . "component" "alerts" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "cv.name" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cv.labels" $ctx | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- .Files.Get "files/prometheus-rules.yaml" | nindent 2 }}
+{{- end }}

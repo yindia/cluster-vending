@@ -264,9 +264,26 @@ bin/cluster-vending cluster create -f examples/cluster.yaml --wait
 bin/cluster-vending cluster get --tenant acme --id <CLUSTER_ID>
 ```
 
-Login is off locally. To turn it on, run `make keycloak`, uncomment the `auth`
+Login is off locally (auth mode `none`): every caller is anonymous, so the API
+listens on `127.0.0.1:8080` only (`http-addr` above). On any other address
+`serve` logs an `INSECURE` warning at start. To turn login on, run `make keycloak`, uncomment the `auth`
 block in your settings file, and restart the API and the console
 (docs/architecture.md#run-locally).
+
+### Metrics
+
+Each process serves Prometheus metrics on the addresses `hack/config.local.yaml` sets
+(docs/architecture.md#metrics-and-alerts lists them):
+
+```sh
+curl -s http://127.0.0.1:8080/metrics | grep '^cluster_vending_rpc'      # API server (its API port)
+curl -s http://127.0.0.1:8082/metrics | grep '^cluster_vending_fleet'    # controller (metrics-addr)
+curl -s http://127.0.0.1:8091/metrics | grep '^cluster_vending_live'     # live reader (live.metricsAddr)
+```
+
+The fleet metrics appear about 30 s after the controller starts (its first refresh).
+`make prom-rules-check` checks the alerts with promtool, or with the
+`prom/prometheus` image when promtool is not installed.
 
 ## 5. After you change code
 
@@ -306,7 +323,10 @@ To run everything in-cluster from the chart, use a separate kind cluster so the
 development one stays untouched: `make kind-up KIND_CLUSTER=cv-helm`, then
 `make docker-build docker-build-ui kind-load helm-install-kind TAG=dev`,
 then `kubectl -n cluster-vending-system port-forward svc/cluster-vending-ui 3000:3000`
-([Install with Helm](architecture.md#install-with-helm)). Remove it with
+([Install with Helm](architecture.md#install-with-helm)). `ci/kind-values.yaml`
+sets `allowInsecureNoAuth: true`, the chart's local/dev-only flag: without it the
+chart refuses to render an API without login. Never set it on a shared cluster.
+Remove it with
 `make kind-down KIND_CLUSTER=cv-helm`.
 
 ## Troubleshooting
@@ -321,6 +341,7 @@ then `kubectl -n cluster-vending-system port-forward svc/cluster-vending-ui 3000
 | A component is `Failed` with `rollout timed out after 10m0s waiting for deployment/<name>` | Its workloads weren't available within the definition's `install.timeout`. Nothing is rolled back: fix what keeps the pods from starting (nodes, image, values); the component turns `Ready` once they run, or `cluster retry --component <name>` retries now. |
 | A component's pods stay `Pending` with `untolerated taint` | It isn't placed on a pool: check its definition uses `${platform.nodeSelector}` and `${platform.tolerations}`, and that the stored `ComponentDefinition` is this build's (see section 5). |
 | Changes in a definition file never reach the cluster | The stored definition counts as edited, so sync leaves it alone. Delete it and restart the controller. |
+| A deleting cluster stays at `stage 5 of 7, Karpenter: sweeping the account: waiting for N left: i-..., arn:aws:elasticloadbalancing:...` | The cloud sweep waits for Karpenter's instances to terminate and the load balancer controller's load balancers, target groups and security groups to go (it deletes them by the cluster's tags). Security groups wait a few minutes for the load balancer's network interfaces. With `AccessDenied` or `UnauthorizedOperation` in the message, the account's role template is older than version 2: run the `aws cloudformation update-stack` that `account create` prints. A load balancer with deletion protection must be unprotected by hand. After `--teardown-timeout` it goes on with a `CloudSweepTimedOut` warning listing the IDs (`status.cloudSweep.waiting`); delete those in the console before deleting the network. |
 | `kubectl` says `no such host` for an EKS cluster | The cluster was recreated and your context is stale. Run `aws eks update-kubeconfig` again. |
 
 ## Clean up

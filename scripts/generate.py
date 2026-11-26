@@ -365,6 +365,30 @@ PROVISION_CLUSTERS = [
             Null("aws:ResourceTag/karpenter.k8s.aws/ec2nodeclass", "false")
         ),
     ),
+    # A cluster's deletion sweeps what its controllers left in the account
+    # (docs/architecture.md#deletion): Karpenter's instances (tagged with
+    # their NodePool) and the AWS Load Balancer Controller's load balancers
+    # and target groups (tagged with its cluster). The launch templates and
+    # security groups are deleted with ProvisionNetwork's actions.
+    statement(
+        "ReadLoadBalancers",
+        actions(
+            "elasticloadbalancing",
+            "DescribeLoadBalancers",
+            "DescribeTargetGroups",
+            "DescribeTags",
+        ),
+    ),
+    statement(
+        "SweepKarpenterInstances",
+        actions("ec2", "TerminateInstances"),
+        condition=Condition(Null("aws:ResourceTag/karpenter.sh/nodepool", "false")),
+    ),
+    statement(
+        "SweepClusterLoadBalancers",
+        actions("elasticloadbalancing", "DeleteLoadBalancer", "DeleteTargetGroup"),
+        condition=Condition(Null("aws:ResourceTag/elbv2.k8s.aws/cluster", "false")),
+    ),
     # The cluster, node and component roles the platform creates are handed
     # only to the AWS services that use them.
     statement(

@@ -1,0 +1,92 @@
+# A Karpenter node pool of the tenant's own, in the tenant's cluster
+# (docs/architecture.md#node-layout, "Tenant pools"). The platform does not
+# apply, change or upgrade it; you apply it with kubectl through the
+# cluster's kubeconfig:
+#
+#   kubectl apply -f examples/tenant-nodepool.yaml
+#
+# The platform's own pool (`platform-pool`) is tainted for platform
+# components; your workloads need a pool like this one to run on. Keep the
+# names off the platform's: not `platform-pool`, not `platform`, and no
+# `cloud.cluster-vending.io/managed-by` label.
+#
+# Replace prod-eks with your EKS cluster's name, and the role with the one
+# `cluster-vending cluster get --id <CLUSTER_ID>` shows as
+# status.aws.karpenterNodeRole ("<prefix>-karpenter-node"). The quickest
+# way to get the selectors right is to copy them from the platform's class:
+#
+#   kubectl get ec2nodeclass platform-pool -o yaml
+#
+# Upgrades: the platform's upgrade does not wait for this pool. Nodes that
+# run an older kubelet than the cluster's new minor are listed in
+# status.upgrade.tenantPoolsBehind; they are yours to roll (Karpenter
+# replaces them on drift once the AMI alias resolves to the new minor, or
+# when expireAfter is reached). Deleting the cluster deletes this pool, its
+# class and its nodes with it.
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: apps
+spec:
+  # The only role Karpenter's controller may pass to EC2 (iam:PassRole on
+  # it alone). Karpenter makes the instance profile from it; do not set
+  # spec.instanceProfile. Another role is denied.
+  role: <prefix>-karpenter-node
+  amiSelectorTerms:
+    - alias: al2023@latest      # or pin a release, e.g. al2023@v20261107
+  # The cluster's subnets carry karpenter.sh/discovery=<cluster name>. When
+  # another cluster of the same network holds that tag, select with
+  #   - tags:
+  #       kubernetes.io/cluster/prod-eks: "*"
+  # instead (the platform's class shows which one your cluster uses).
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: prod-eks
+  # The EKS cluster security group, tagged by EKS itself.
+  securityGroupSelectorTerms:
+    - tags:
+        aws:eks:cluster-name: prod-eks
+  # Tags on every instance, volume and launch template Karpenter makes from
+  # this class: the platform's tenant and cluster tags attribute the spend
+  # (activate them as cost allocation tags), like the platform pool's
+  # (`kubectl get ec2nodeclass platform-pool -o jsonpath='{.spec.tags}'`).
+  # Karpenter adds karpenter.sh/nodepool and kubernetes.io/cluster/<name>
+  # itself; those are what the cluster's deletion finds and terminates
+  # these nodes by if the pool was not removed first. Do not set them, or
+  # Name, here (Karpenter refuses its own keys).
+  tags:
+    cluster-vending.io/tenant: <TENANT_ID>
+    cluster-vending.io/cluster: <CLUSTER_ID>
+    cluster-vending.io/cluster-name: prod-eks
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: apps
+spec:
+  template:
+    metadata:
+      labels:
+        workload: apps
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: apps
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand", "spot"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["c", "m", "r"]
+      expireAfter: 720h
+  limits:
+    cpu: "100"
+    memory: 400Gi
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 1m

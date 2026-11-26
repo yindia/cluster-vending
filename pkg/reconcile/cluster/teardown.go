@@ -14,15 +14,16 @@ import (
 )
 
 // leftBehind is what a skipped or timed-out teardown may leave in the
-// cloud, and what that blocks.
+// cloud, and what deletes it then: the cloud sweep (delete_cloud_sweep.go)
+// finds it by the cluster's tags.
 const leftBehind = "load balancers and their security groups (of Services of type LoadBalancer and Ingresses), " +
-	"Karpenter's EC2 instances, launch templates and instance profiles may be left in the account; " +
-	"network delete then waits until they are deleted"
+	"Karpenter's EC2 instances and launch templates are deleted by the cloud sweep (stage 5) by the cluster's tags; " +
+	"what carries none of them (a Service of the in-tree cloud provider, a load balancer made by hand) may be left in the account"
 
 // loadBalancerLeftBehind is what a skipped or timed-out load balancer
-// stage may leave.
-const loadBalancerLeftBehind = "load balancers and their security groups (of Services of type LoadBalancer and Ingresses) " +
-	"may be left in the account; network delete then waits until they are deleted"
+// stage may leave, and what deletes it then.
+const loadBalancerLeftBehind = "the AWS Load Balancer Controller's load balancers, target groups and security groups " +
+	"are deleted by the cloud sweep (stage 5) by the cluster's tags; others may be left in the account"
 
 // teardown is the first stage of a cluster's deletion: in the workload
 // cluster, the load balancers its controllers made in the cloud are deleted
@@ -145,7 +146,14 @@ func refs(objs []reconcile.WorkloadObject) []string {
 // the pass records (withTeardownStatus).
 type teardownKey struct{}
 
-type teardownHolder struct{ t *cloudv1.ClusterTeardown }
+type teardownHolder struct {
+	t *cloudv1.ClusterTeardown
+	// nodes and sweep are the node groups' stage and the cloud sweep
+	// (delete_cloud_status.go); set says the pass computed them (nil:
+	// cleared).
+	nodes, sweep       *cloudv1.ClusterTeardown
+	nodesSet, sweepSet bool
+}
 
 // withTeardownHolder returns a context a pass's teardown leaves its state
 // in.
@@ -162,6 +170,7 @@ func setTeardown(ctx context.Context, t *cloudv1.ClusterTeardown) {
 // withTeardownStatus puts the teardown into a status being built: the
 // one this pass computed, else the one recorded.
 func withTeardownStatus(ctx context.Context, st, stored *cloudv1.ClusterStatus) {
+	withDeleteClocksStatus(ctx, st, stored)
 	t := stored.GetTeardown()
 	if h, ok := ctx.Value(teardownKey{}).(*teardownHolder); ok && h.t != nil {
 		t = h.t

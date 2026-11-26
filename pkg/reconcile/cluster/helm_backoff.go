@@ -87,6 +87,11 @@ func (s *Reconciler) backoff(ctx context.Context, row *model.Cluster, namespace,
 	case helmrel.Unpause:
 		s.clearFailedHooks(ctx, row, namespace, d, dec.State)
 		s.setBackoff(ctx, row, namespace, object, time.Time{}, false)
+		if r.TimedOut {
+			// The next attempt of a timed-out rollout gets a full install
+			// timeout, not the clock that already ran out.
+			s.clearRolloutMark(ctx, row.ID, namespace, object)
+		}
 	}
 	reportBackoff(c, dec.State, d, dec.Action == helmrel.Pause || d.PausedByUs && dec.Action != helmrel.Unpause)
 	if dec.GaveUp {

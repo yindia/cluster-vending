@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
+	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	"github.com/yindia/cluster-vending/pkg/kube"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
@@ -96,5 +97,16 @@ func TestCodeConvergenceWithoutProviderObservedGeneration(t *testing.T) {
 				t.Fatalf("converged with err=%v", err)
 			}
 		})
+	}
+}
+
+// The network's objects are EC2 resources: their provider runs with the
+// EC2 poll, so an apply counts as observed only once that poll has surely
+// run since. A bound shorter than the poll finishes a change on a cached
+// Ready=True.
+func TestProviderObservationBoundCoversTheEC2Poll(t *testing.T) {
+	poll := crossplaneaws.DefaultProviderRuntime().EC2Poll
+	if providerObservationBound <= poll {
+		t.Errorf("observation bound %s is not longer than the EC2 poll %s", providerObservationBound, poll)
 	}
 }

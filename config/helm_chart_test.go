@@ -12,6 +12,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"sigs.k8s.io/yaml"
 
@@ -27,6 +28,11 @@ const (
 	chartDir       = "../charts/cluster-vending"
 	chartNamespace = "cluster-vending-system"
 	chartRoleARN   = "arn:aws:iam::111122223333:role/crossplane-provider-aws"
+	// chartAuthValues is the API's login of a production install; the
+	// chart refuses to render the API without one (or the insecure flag).
+	chartAuthValues = chartDir + "/ci/auth-values.yaml"
+	// chartInsecure is the local/dev-only flag that renders without login.
+	chartInsecure = "allowInsecureNoAuth=true"
 )
 
 // chartRoleCopies are the role files the chart reads (files/rbac, make
@@ -58,7 +64,9 @@ type rendered struct {
 	roles       map[string]*rbacv1.ClusterRole
 	accounts    map[string]*corev1.ServiceAccount
 	configMaps  map[string]*corev1.ConfigMap
-	kinds       []string
+	// networkPolicies are the NetworkPolicies by name.
+	networkPolicies map[string]*networkingv1.NetworkPolicy
+	kinds           []string
 }
 
 // deployment is the rendered Deployment of that name.
@@ -134,22 +142,39 @@ func roleFile(t *testing.T, path string) *rbacv1.ClusterRole {
 // renderChart runs helm template with the release name cluster-vending, the
 // placeholder management role and the given --set values, and keys the
 // objects by name. The test is skipped without helm.
-func renderChart(t *testing.T, set ...string) rendered {
+// helmTemplate runs `helm template` of the chart with the management role
+// and extra (skipped without helm).
+func helmTemplate(t *testing.T, extra ...string) ([]byte, error) {
 	t.Helper()
 	helm, err := exec.LookPath("helm")
 	if err != nil {
 		t.Skip("helm is not installed")
 	}
-	args := []string{"template", "cluster-vending", chartDir, "--namespace", chartNamespace, "--set", "aws.managementRoleArn=" + chartRoleARN}
+	args := append([]string{"template", "cluster-vending", chartDir, "--namespace", chartNamespace, "--set", "aws.managementRoleArn=" + chartRoleARN}, extra...)
+	return exec.Command(helm, args...).CombinedOutput()
+}
+
+// renderChart renders the chart with the API's login of a production
+// install (chartAuthValues) and set.
+func renderChart(t *testing.T, set ...string) rendered {
+	t.Helper()
+	args := []string{"-f", chartAuthValues}
 	for _, s := range set {
 		args = append(args, "--set", s)
 	}
-	out, err := exec.Command(helm, args...).CombinedOutput()
+	return renderChartArgs(t, args...)
+}
+
+// renderChartArgs renders the chart with args and nothing else.
+func renderChartArgs(t *testing.T, args ...string) rendered {
+	t.Helper()
+	out, err := helmTemplate(t, args...)
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, out)
 	}
 	r := rendered{deployments: map[string]*appsv1.Deployment{}, roles: map[string]*rbacv1.ClusterRole{},
-		accounts: map[string]*corev1.ServiceAccount{}, configMaps: map[string]*corev1.ConfigMap{}}
+		accounts: map[string]*corev1.ServiceAccount{}, configMaps: map[string]*corev1.ConfigMap{},
+		networkPolicies: map[string]*networkingv1.NetworkPolicy{}}
 	for _, doc := range bytes.Split(out, []byte("\n---\n")) {
 		var meta struct{ Kind string }
 		if yaml.Unmarshal(doc, &meta) != nil || meta.Kind == "" {
@@ -174,6 +199,10 @@ func renderChart(t *testing.T, set ...string) rendered {
 			c := &corev1.ConfigMap{}
 			err = yaml.UnmarshalStrict(doc, c)
 			r.configMaps[c.Name] = c
+		case "NetworkPolicy":
+			n := &networkingv1.NetworkPolicy{}
+			err = yaml.UnmarshalStrict(doc, n)
+			r.networkPolicies[n.Name] = n
 		}
 		if err != nil {
 			t.Fatalf("rendered %s: %v\n%s", meta.Kind, err, doc)
@@ -256,7 +285,7 @@ func TestChartControllerSettingsLoad(t *testing.T) {
 	if cfg.ServiceAccount == nil || *cfg.ServiceAccount != account {
 		t.Errorf("service account = %+v, want %+v", cfg.ServiceAccount, account)
 	}
-	if !cfg.LeaderElect || cfg.LeaseNamespace != chartNamespace || cfg.ProbeAddr != ":8081" || cfg.MetricsAddr != "0" {
+	if !cfg.LeaderElect || cfg.LeaseNamespace != chartNamespace || cfg.ProbeAddr != ":8081" || cfg.MetricsAddr != ":8080" {
 		t.Errorf("loaded %+v", cfg)
 	}
 	if cfg.AWS.ManagementRoleARN != chartRoleARN || !cfg.InstallProviders {
@@ -322,7 +351,7 @@ func TestChartLiveReader(t *testing.T) {
 // The chart's default settings file is config/node-groups/platform.yaml
 // plus the management role.
 func TestChartPlatformDefaultsMatchConfig(t *testing.T) {
-	r := renderChart(t)
+	r := renderChartArgs(t, "--set", chartInsecure)
 	var got, want map[string]any
 	if err := yaml.Unmarshal([]byte(r.configMaps["cluster-vending-platform"].Data["platform.yaml"]), &got); err != nil {
 		t.Fatal(err)
@@ -363,5 +392,82 @@ func TestChartServiceAccountsHaveNoDefaultRole(t *testing.T) {
 		if _, set := sa.Annotations["eks.amazonaws.com/role-arn"]; set {
 			t.Errorf("service account %s has an IAM role by default", name)
 		}
+	}
+}
+
+// The chart's production login is the auth section of config/server/auth,
+// the kustomize overlay that requires tokens.
+func TestChartAuthValuesMatchConfig(t *testing.T) {
+	r := renderChart(t)
+	var got, want map[string]any
+	if err := yaml.Unmarshal([]byte(r.configMaps["cluster-vending-platform"].Data["platform.yaml"]), &got); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join("server", "auth", "platform.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(raw, &want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got["auth"], want["auth"]) {
+		t.Errorf("%s auth %v differs from config/server/auth/platform.yaml %v", chartAuthValues, got["auth"], want["auth"])
+	}
+	if _, ok := got["allowInsecureNoAuth"]; ok {
+		t.Error("allowInsecureNoAuth is in the settings file: it is a chart value only")
+	}
+}
+
+// The chart refuses an API, or a published console, without login unless
+// the local/dev flag is set.
+func TestChartRefusesNoLogin(t *testing.T) {
+	const ingress = "ui.ingress.enabled=true"
+	tests := []struct {
+		name string
+		args []string
+		// want is part of the failure; "" when the render succeeds.
+		want string
+	}{
+		{"no auth", nil, "platform.auth.mode must be required"},
+		{"mode none", []string{"--set", "platform.auth.mode=none"}, "platform.auth.mode must be required"},
+		{"no auth, insecure flag", []string{"--set", chartInsecure}, ""},
+		{"no auth, no server", []string{"--set", "server.enabled=false", "--set", "ui.apiBaseUrl=http://api.example:8080"}, ""},
+		{"auth required", []string{"-f", chartAuthValues}, ""},
+		{"ingress without ui.auth", []string{"-f", chartAuthValues, "--set", ingress}, "ui.ingress.enabled needs ui.auth.enabled"},
+		{"ingress without ui.auth, insecure flag", []string{"--set", chartInsecure, "--set", ingress}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := helmTemplate(t, tt.args...)
+
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("helm template: %v\n%s", err, out)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(string(out), tt.want) {
+				t.Errorf("helm template = %v, want a failure with %q:\n%.400s", err, tt.want, out)
+			}
+		})
+	}
+}
+
+// By default only the console's pods (and networkPolicy.server.from) reach
+// the API server.
+func TestChartServerNetworkPolicyByDefault(t *testing.T) {
+	r := renderChart(t)
+	policy, ok := r.networkPolicies["cluster-vending-server"]
+	if !ok {
+		t.Fatal("the chart renders no NetworkPolicy for the API server by default")
+	}
+	rules := policy.Spec.Ingress
+	if len(rules) != 1 || len(rules[0].From) != 1 || rules[0].From[0].PodSelector == nil ||
+		rules[0].From[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "ui" {
+		t.Errorf("the API server accepts %+v, want the console's pods only", rules)
+	}
+	extra := renderChart(t, "networkPolicy.server.from[0].namespaceSelector.matchLabels.name=ingress")
+	if from := extra.networkPolicies["cluster-vending-server"].Spec.Ingress[0].From; len(from) != 2 {
+		t.Errorf("networkPolicy.server.from is not added: %+v", from)
 	}
 }

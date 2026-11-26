@@ -37,11 +37,18 @@ spec:
         env:
         - name: CV_LIVE_ADDR
           value: :8090
+        # /metrics on a port of its own: a scraper never reaches the
+        # internal endpoint (network_policy.yaml).
+        - name: CV_LIVE_METRICS_ADDR
+          value: :8091
         - name: CV_LOG_FORMAT
           value: json
         ports:
         - containerPort: 8090
           name: http
+          protocol: TCP
+        - containerPort: 8091
+          name: metrics
           protocol: TCP
         securityContext:
           readOnlyRootFilesystem: true

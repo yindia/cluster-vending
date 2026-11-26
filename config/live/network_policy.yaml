@@ -25,6 +25,15 @@ spec:
     ports:
     - port: 8090
       protocol: TCP
+  # The metrics port (it serves no RPC) from namespaces labelled
+  # metrics=enabled, as ../network-policy does for the controller.
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          metrics: enabled
+    ports:
+    - port: 8091
+      protocol: TCP
   egress:
   - ports:
     - port: 53

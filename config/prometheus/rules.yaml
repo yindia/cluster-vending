@@ -1,3 +1,6 @@
+# The platform's alerts (Prometheus Operator). Each runbook_url is a section
+# of docs/architecture.md (Metrics and alerts). The chart's
+# files/prometheus-rules.yaml is the spec below (make helm-sync).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -9,14 +12,48 @@ spec:
   groups:
   - name: cluster-vending
     rules:
+    - alert: ClusterVendingControllerDown
+      expr: >-
+        absent(up{cluster_vending_role="controller"} == 1)
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "No cluster vending controller is up"
+        description: "No controller target answers its scrape: nothing reconciles, rolls out or deletes. Inspect the controller Deployment, its logs and leader election."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingcontrollerdown
     - alert: ClusterVendingMetricsTargetDown
-      expr: up{cluster_vending_role=~"server|controller"} == 0
+      expr: >-
+        up{cluster_vending_role=~"server|controller|live"} == 0
       for: 5m
       labels:
         severity: warning
       annotations:
-        summary: Cluster vending metrics target is unavailable
-        description: Inspect the pod, metrics listener and scrape network access.
+        summary: "A cluster vending metrics target is unavailable"
+        description: "Inspect the pod, metrics listener and scrape network access (networkPolicy.metricsFrom, networkPolicy.server.from)."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingmetricstargetdown
+    - alert: ClusterVendingReconcileErrors
+      expr: >-
+        sum by (job, controller) (rate(controller_runtime_reconcile_errors_total[15m]))
+        / clamp_min(sum by (job, controller) (rate(controller_runtime_reconcile_total[15m])), 0.001) > 0.2
+        and sum by (job, controller) (rate(controller_runtime_reconcile_errors_total[15m])) > 0.01
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "More than 20% of a controller's reconciles fail"
+        description: "Inspect the controller's logs for {{ $labels.controller }}: provider, Kubernetes API or AWS errors."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingreconcileerrors
+    - alert: ClusterVendingReconcileStuck
+      expr: >-
+        max by (job, name) (workqueue_longest_running_processor_seconds) > 900
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "A reconcile has been running for over 15 minutes"
+        description: "Worker of {{ $labels.name }} is blocked (a slow AWS or workload-cluster call); the queue behind it waits. Inspect the controller's logs and goroutines."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingreconcilestuck
     - alert: ClusterVendingRPCServerErrors
       expr: >-
         (sum(rate(cluster_vending_rpc_requests_total{code=~"internal|unknown|unavailable|deadline_exceeded"}[5m]))
@@ -26,8 +63,21 @@ spec:
       labels:
         severity: warning
       annotations:
-        summary: More than 5% of cluster vending RPCs fail with server errors
-        description: Inspect RPC result codes, controller health and Kubernetes API errors. Authentication and validation errors are excluded.
+        summary: "More than 5% of cluster vending RPCs fail with server errors"
+        description: "Inspect RPC result codes, controller health and Kubernetes API errors. Authentication and validation errors are excluded."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingrpcservererrors
+    - alert: ClusterVendingLiveReaderUnreachable
+      expr: >-
+        sum(rate(cluster_vending_live_client_requests_total{outcome=~"unreachable|timeout"}[5m]))
+        / clamp_min(sum(rate(cluster_vending_live_client_requests_total[5m])), 0.001) > 0.5
+        and sum(rate(cluster_vending_live_client_requests_total[5m])) > 0.01
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "The API server cannot reach the live reader"
+        description: "Over half of the live reads time out or do not reach the reader: node lists and totals fail. Inspect the live reader pod, its Service and networkPolicy.live."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendinglivereaderunreachable
     - alert: ClusterVendingFleetMetricsStale
       expr: >-
         (cluster_vending_fleet_metrics_active == 1)
@@ -38,16 +88,191 @@ spec:
       labels:
         severity: warning
       annotations:
-        summary: Cluster vending fleet snapshot is stale
-        description: Fleet data is retained after failed reads; inspect cache sync, permissions and controller logs before trusting fleet counts.
+        summary: "Cluster vending fleet snapshot is stale"
+        description: "Fleet data is retained after failed reads; inspect cache sync, permissions and controller logs before trusting fleet counts."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingfleetmetricsstale
     - alert: ClusterVendingNoFleetPublisher
-      expr: sum(cluster_vending_fleet_metrics_active) < 1 or absent(cluster_vending_fleet_metrics_active)
+      expr: >-
+        sum(cluster_vending_fleet_metrics_active) < 1 or absent(cluster_vending_fleet_metrics_active)
       for: 5m
       labels:
         severity: warning
       annotations:
-        summary: No controller is publishing fleet metrics
-        description: Inspect controller leader election and controller pod health.
+        summary: "No controller is publishing fleet metrics"
+        description: "Inspect controller leader election and controller pod health."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingnofleetpublisher
+    - alert: ClusterVendingResourcesFailed
+      expr: >-
+        (cluster_vending_fleet_resources{phase="failed"} > 0)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "{{ $value }} {{ $labels.kind }} owners are FAILED"
+        description: "List them (`cluster-vending cluster list`, `kubectl get cvc -A`) and read their status message and recent events."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingresourcesfailed
+    - alert: ClusterVendingComponentsFailed
+      expr: >-
+        (sum by (job, instance, scope, component) (cluster_vending_fleet_component_phases{phase="failed"}) > 0)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "{{ $value }} {{ $labels.scope }} {{ $labels.component }} components are FAILED"
+        description: "Read the component's status (chart, Helm state, last error) on the cluster; `cluster retry` once the cause is fixed."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingcomponentsfailed
+    - alert: ClusterVendingComponentNotReady
+      expr: >-
+        (cluster_vending_fleet_component_oldest_not_ready_seconds > 1800)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "A {{ $labels.scope }} {{ $labels.component }} component has not been Ready for over 30 minutes"
+        description: "Inspect its rollout (Deployments, StatefulSets, DaemonSets in the workload cluster), Helm state and the platform's backoff."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingcomponentnotready
+    - alert: ClusterVendingHelmReleaseGaveUp
+      expr: >-
+        (cluster_vending_fleet_helm_releases{state="gave_up"} > 0)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "The platform gave up on {{ $value }} Helm releases"
+        description: "A release failed MaxFailures times in a row; it is retried at the backoff cap only. Fix the chart, values or workload and `cluster retry`."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendinghelmreleasegaveup
+    - alert: ClusterVendingHelmReleaseStuck
+      expr: >-
+        (cluster_vending_fleet_helm_releases{state="stuck"} > 0)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 30m
+      labels:
+        severity: warning
+      annotations:
+        summary: "{{ $value }} Helm releases are pending or uninstalling"
+        description: "A release stuck in pending-* or uninstalling for 30 minutes; the platform recovers stuck releases up to 3 times."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendinghelmreleasestuck
+    - alert: ClusterVendingStuckReleaseRecoveryLimit
+      expr: >-
+        increase(cluster_vending_events_total{reason="RecoveryLimitReached"}[1h]) > 0
+      labels:
+        severity: warning
+      annotations:
+        summary: "A stuck Helm release was recovered as often as allowed"
+        description: "The component stays FAILED; look at its chart in the workload cluster."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingstuckreleaserecoverylimit
+    - alert: ClusterVendingRolloutHalted
+      expr: >-
+        (cluster_vending_rollout_halted == 1)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "The {{ $labels.rollout }} rollout of channel {{ $labels.channel }} is halted"
+        description: "More clusters of a tier failed than the channel's policy allows: fix or retry them; nothing more starts until then."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingrollouthalted
+    - alert: ClusterVendingUpgradeHalted
+      expr: >-
+        (cluster_vending_fleet_upgrade_halted > 0)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "{{ $value }} Kubernetes upgrades on channel {{ $labels.channel }} are halted"
+        description: "The add-ons did not settle after the automatic recoveries; the upgrade waits for `cluster retry`."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingupgradehalted
+    - alert: ClusterVendingChangeHalted
+      expr: >-
+        ((cluster_vending_fleet_code_changes{phase="halted"} > 0) or (cluster_vending_fleet_release_moves{phase="halted"} > 0))
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "A code change or release move is halted"
+        description: "A cluster's code or catalog change, or its component move to a release, halted on a failure; see the cluster's status and events (CodeChangeHalted, ReleaseMoveHalted)."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingchangehalted
+    - alert: ClusterVendingDeletionStuck
+      expr: >-
+        (cluster_vending_fleet_oldest_deleting_seconds > 7200)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "A {{ $labels.kind }} has been deleting for over 2 hours"
+        description: "Inspect its DeletionBlocked condition, the dependents named there, and the cloud resources left (status message)."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingdeletionstuck
+    - alert: ClusterVendingTeardownTimedOut
+      expr: >-
+        increase(cluster_vending_events_total{reason="TeardownTimedOut"}[1h]) > 0
+      labels:
+        severity: warning
+      annotations:
+        summary: "A cluster's teardown timed out"
+        description: "The deletion went on with workload load balancers or nodes left; their cloud resources may be left behind in the account."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingteardowntimedout
+    - alert: ClusterVendingAccountAccessLost
+      expr: >-
+        (cluster_vending_fleet_conditions{kind="cloudaccount",condition="accessverified",status="false"} > 0)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "{{ $value }} cloud accounts fail their access check"
+        description: "The tenant role cannot be used in a region or misses a permission: `account verify` names it."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingaccountaccesslost
+    - alert: ClusterVendingClustersUnreachable
+      expr: >-
+        (cluster_vending_fleet_conditions{kind="cluster",condition="reachable",status="false"} > 0)
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "{{ $value }} clusters are unreachable by the controller"
+        description: "The workload API cannot be read or rejects the platform's credentials (Reachable condition): scans, components and counts are stale."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingclustersunreachable
+    - alert: ClusterVendingScanLagging
+      expr: >-
+        ((cluster_vending_fleet_scan_oldest_attempt_seconds{kind="deprecations"} > 13 * 3600)
+        or (cluster_vending_fleet_scan_oldest_attempt_seconds{kind=~"recommendations|policy"} > 3600))
+        and on(job, instance) (cluster_vending_fleet_metrics_active == 1)
+        and on(job, instance) (time() - cluster_vending_fleet_metrics_last_success_timestamp_seconds < 120)
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "The {{ $labels.kind }} scans are falling behind"
+        description: "A running cluster was not scanned for two intervals or more: the scanner's single worker is slow or blocked. Inspect controller_runtime_reconcile_time_seconds of the scan controller."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingscanlagging
+    - alert: ClusterVendingResultsWriteFailing
+      expr: >-
+        increase(cluster_vending_results_write_failures_total[1h]) > 3
+      labels:
+        severity: warning
+      annotations:
+        summary: "Scan results ({{ $labels.kind }}) are not reaching the results buckets"
+        description: "The bucket is missing, not ready, or the tenant role cannot write it; the Cluster keeps the counts and a notice."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingresultswritefailing
     - alert: ClusterVendingProvisioningSlow
       expr: >-
         (cluster_vending_fleet_oldest_provisioning_seconds{kind=~"cluster|network"} > 3600)
@@ -57,8 +282,9 @@ spec:
       labels:
         severity: warning
       annotations:
-        summary: A network or cluster has been provisioning for over an hour
-        description: Inspect owner conditions, provider queues, cloud quotas and freeze state. The age includes time intentionally frozen.
+        summary: "A network or cluster has been provisioning for over an hour"
+        description: "Inspect owner conditions, provider queues, cloud quotas and freeze state. The age includes time intentionally frozen."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingprovisioningslow
     - alert: ClusterVendingUpgradePhaseSlow
       expr: >-
         (cluster_vending_fleet_upgrade_oldest_phase_seconds > 1800)
@@ -68,8 +294,9 @@ spec:
       labels:
         severity: warning
       annotations:
-        summary: A Kubernetes upgrade phase has lasted over 30 minutes
-        description: Inspect upgrade progress, node drains, add-on health and freeze state. Tune this threshold to workload size.
+        summary: "A Kubernetes upgrade phase has lasted over 30 minutes"
+        description: "Inspect upgrade progress, node drains, add-on health and freeze state. Tune this threshold to workload size."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingupgradephaseslow
     - alert: ClusterVendingFreezeNotConfirmed
       expr: >-
         (cluster_vending_freeze_phase{phase=~"pending|freezing"} == 1)
@@ -79,5 +306,6 @@ spec:
       labels:
         severity: warning
       annotations:
-        summary: The platform freeze has not been confirmed
-        description: Inspect freeze status and provider pause failures; policy presence alone does not confirm reconciliation is paused.
+        summary: "The platform freeze has not been confirmed"
+        description: "Inspect freeze status and provider pause failures; policy presence alone does not confirm reconciliation is paused."
+        runbook_url: https://github.com/yindia/cluster-vending/blob/main/docs/architecture.md#clustervendingfreezenotconfirmed

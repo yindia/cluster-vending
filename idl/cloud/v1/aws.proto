@@ -301,4 +301,11 @@ message AwsClusterStatus {
   string node_group_arn = 4;
   // Every add-on with the version it runs.
   repeated AwsAddonStatus addons = 5;
+  // The IAM role Karpenter's nodes run as ("<prefix>-karpenter-node") and
+  // its ARN, once the role is Ready: what an EC2NodeClass the tenant makes
+  // names in spec.role (Karpenter makes the instance profile from it; its
+  // controller policy passes only this role). Empty for a cluster without
+  // Karpenter.
+  string karpenter_node_role = 6;
+  string karpenter_node_role_arn = 7;
 }

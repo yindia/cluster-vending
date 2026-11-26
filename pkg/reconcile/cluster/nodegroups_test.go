@@ -128,59 +128,6 @@ func tenantGroup(name string) []client.Object {
 	return out
 }
 
-// A cluster built before the platform owned its node groups still has a
-// tenant group in its workload cluster: the platform no longer renders it,
-// so it is removed through the same path as any group the platform stopped
-// rendering (its NodePool first, Karpenter drains its nodes, then its class
-// once the pool and its nodes are gone), reported DELETING meanwhile. The
-// platform pool and an object the platform does not own stay.
-func TestATenantGroupOfAnExistingClusterIsRemoved(t *testing.T) {
-	foreign := &unstructured.Unstructured{}
-	foreign.SetGroupVersionKind(crossplaneaws.KarpenterNodePoolGVK)
-	foreign.SetName("hand-made")
-	fw := newFakeWorkload(interceptor.Funcs{}, append(tenantGroup("gpu"), foreign, karpenterNode("gpu-1", "gpu", true))...)
-	w, row := nodeGroupWorld(t, fw)
-	withPlatformPool(w)
-	karpenter := karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY)
-
-	res := passOf(w, row, karpenter)
-
-	if fw.get(t, "NodePool", "", "gpu") != nil {
-		t.Error("the tenant group's NodePool is still there")
-	}
-	if fw.get(t, "EC2NodeClass", "", "gpu") == nil {
-		t.Error("the class went before its pool's nodes")
-	}
-	g := statusOf(res, "gpu")
-	if g.GetPhase() != cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING || g.GetPlatformManaged() || g.GetMessage() != removedGroupMessage || g.GetNodes() != 1 {
-		t.Errorf("removed group status = %v", g)
-	}
-	st := &cloudv1.ClusterStatus{}
-	ctx := withNodeGroupsHolder(context.Background())
-	ctx.Value(nodeGroupsKey{}).(*nodeGroupsHolder).r = res
-	withNodeGroups(ctx, st, &cloudv1.ClusterStatus{})
-	var names []string
-	for _, n := range st.GetNodeGroups() {
-		names = append(names, n.GetName())
-	}
-	if !slices.Equal(names, []string{systemNodeGroup, platformPool, "gpu"}) {
-		t.Errorf("status lists %v", names)
-	}
-
-	if err := fw.c.Delete(t.Context(), karpenterNode("gpu-1", "gpu", true)); err != nil {
-		t.Fatal(err)
-	}
-	passOf(w, row, karpenter)
-	res = passOf(w, row, karpenter)
-
-	if fw.get(t, "EC2NodeClass", "", "gpu") != nil || statusOf(res, "gpu") != nil {
-		t.Errorf("the tenant group's class is still there (status %v)", statusOf(res, "gpu"))
-	}
-	if fw.get(t, "NodePool", "", "hand-made") == nil || fw.get(t, "NodePool", "", platformPool) == nil {
-		t.Error("an object the platform does not own, or the platform pool, was deleted")
-	}
-}
-
 // A stored spec of an earlier build still carries the removed node group
 // fields: they are ignored on read and never rendered. The cluster gets the
 // platform's system group and only the platform pool.
@@ -264,7 +211,7 @@ func TestNodeGroupsKeepTheLastGoodStatusOnErrors(t *testing.T) {
 	setReady(t, fw, "NodePool", platformPool, true)
 	setReady(t, fw, "EC2NodeClass", platformPool, true)
 	good := passOf(w, row, karpenter)
-	removed := groupStatus("gpu", false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING, removedGroupMessage, 2)
+	removed := groupStatus("gpu", false, cloudv1.NodeGroupPhase_NODE_GROUP_PHASE_DELETING, "recorded by an earlier build", 2)
 	recorded := []*cloudv1.NodeGroupStatus{good.platformPool, removed}
 	row.Status = mustStatus(t, &cloudv1.ClusterStatus{NodeGroups: recorded})
 
@@ -439,7 +386,7 @@ func TestAppliedObjectsAreTheRenderedOnes(t *testing.T) {
 	passOf(w, row, karpenterOf(cloudv1.ComponentPhase_COMPONENT_PHASE_READY))
 	want, err := crossplaneaws.KarpenterNodeGroupObjects(crossplaneaws.KarpenterNodeGroupsInput{ClusterName: row.Name,
 		ClusterPrefix: crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name), AMIPin: "v20261107", Discovery: true,
-		PlatformPool: w.svc.platformPoolInput()})
+		PlatformPool: w.svc.platformPoolInput(), Tags: crossplaneaws.KarpenterNodeTags(row.TenantID, row.ID, row.Name, row.Labels)})
 	if err != nil || len(want) != 2 {
 		t.Fatalf("%d objects, %v", len(want), err)
 	}

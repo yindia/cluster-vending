@@ -24,6 +24,14 @@ spec:
     ports:
     - port: 8090
       protocol: TCP
+  {{- if .Values.live.metrics.enabled }}
+  # The metrics port (no RPC is served there) from networkPolicy.metricsFrom.
+  - from:
+      {{- toYaml .Values.networkPolicy.metricsFrom | nindent 6 }}
+    ports:
+    - port: {{ .Values.live.metrics.port }}
+      protocol: TCP
+  {{- end }}
   egress:
   - ports:
     - port: 53
@@ -94,8 +102,9 @@ spec:
 {{- end }}
 {{- if and .Values.controller.enabled .Values.controller.metrics.enabled .Values.networkPolicy.controllerMetrics }}
 ---
-# Only namespaces labelled metrics=enabled reach the metrics port; the probe
-# port stays open for the kubelet (config/network-policy).
+# Only networkPolicy.metricsFrom (by default namespaces labelled
+# metrics=enabled) reaches the metrics port; the probe port stays open for
+# the kubelet (config/network-policy).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -111,9 +120,7 @@ spec:
   - Ingress
   ingress:
   - from:
-    - namespaceSelector:
-        matchLabels:
-          metrics: enabled
+      {{- toYaml .Values.networkPolicy.metricsFrom | nindent 6 }}
     ports:
     - port: {{ .Values.controller.metrics.port }}
       protocol: TCP

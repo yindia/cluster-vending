@@ -109,12 +109,17 @@ func (g *helmGate) rollout(ctx context.Context, object string, d *releaseDetail)
 	what, _, _ := strings.Cut(problem, ": ") // the workload, as a stable name
 	switch {
 	case err != nil:
-		what = fmt.Sprintf("the workloads of chart %s to be read", d.Chart)
-		problem = fmt.Sprintf("%s (%v)", what, err)
+		// Nothing was read: not a failure of the rollout (an unreachable
+		// API is transient, never counted). The install timeout neither
+		// starts nor runs meanwhile; one already running restarts once
+		// the workloads are read again.
+		if marked && !mark.Since.IsZero() {
+			g.clearRollout(ctx, object)
+		}
+		r = readiness{Message: fmt.Sprintf("the workloads of chart %s to be read (%v); the install timeout runs once they are", d.Chart, err)}
 	case problem == "":
 		g.markRollout(ctx, object, helmrel.RolloutMark{Digest: d.Digest, Revision: d.Revision, Done: true})
-	}
-	if problem != "" {
+	default:
 		since := mark.Since
 		if !marked || since.IsZero() {
 			since = at
@@ -170,6 +175,44 @@ func (g *helmGate) markRollout(ctx context.Context, object string, m helmrel.Rol
 	if err := client.IgnoreNotFound(g.s.deps.Kube.Patch(ctx, u, client.RawPatch(client.Merge.Type(), raw))); err != nil {
 		g.s.logger().WarnContext(ctx, "helm rollout not recorded on the Release", "cluster_id", g.cluster, "release", object, "error", err)
 	}
+}
+
+// clearRollout removes the Release's rollout mark: its install timeout
+// starts again when its workloads are next read unavailable. A retry, a
+// recovery and the end of a backoff (the Release is tried again) clear it,
+// as does a pass that could not read the workloads. Best effort, like
+// markRollout.
+func (g *helmGate) clearRollout(ctx context.Context, object string) {
+	if g.s == nil {
+		return
+	}
+	g.s.clearRolloutMark(ctx, g.cluster, g.namespace, object)
+}
+
+// clearRolloutMark removes helmrel.RolloutAnnotation from the Release
+// object (a merge patch of its metadata).
+func (s *Reconciler) clearRolloutMark(ctx context.Context, cluster, namespace, object string) {
+	if s.deps.Kube == nil {
+		return
+	}
+	raw, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]any{helmrel.RolloutAnnotation: nil}}})
+	if err != nil {
+		return
+	}
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(crossplaneaws.HelmReleaseGVK)
+	u.SetNamespace(namespace)
+	u.SetName(object)
+	if err := client.IgnoreNotFound(s.deps.Kube.Patch(ctx, u, client.RawPatch(client.Merge.Type(), raw))); err != nil {
+		s.logger().WarnContext(ctx, "helm rollout mark not cleared on the Release", "cluster_id", cluster, "release", object, "error", err)
+	}
+}
+
+// rolloutRunning reports whether d's Release carries a rollout mark that
+// is not done: an install timeout is running (or ran out) for it.
+func rolloutRunning(d *releaseDetail) bool {
+	m, ok := helmrel.ParseRolloutMark(d.rollout)
+	return ok && !m.Done
 }
 
 // workloadReader is the pass's reader of the cluster's workloads; nil

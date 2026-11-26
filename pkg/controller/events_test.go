@@ -233,3 +233,21 @@ func TestReleaseControllersEmitEvents(t *testing.T) {
 		t.Errorf("a pass that changed nothing emitted %v", got)
 	}
 }
+
+type countedEvents struct{ seen []string }
+
+func (c *countedEvents) Event(kind, eventType, reason string) {
+	c.seen = append(c.seen, kind+" "+eventType+" "+reason)
+}
+
+// Every event is counted, also one for a kind the recorder drops.
+func TestEventsAreCounted(t *testing.T) {
+	counter := &countedEvents{}
+	e := NewEvents(events.NewFakeRecorder(4), nil).Counted(counter)
+	e.Event(t.Context(), platform.Object{Kind: "Cluster", Name: "prod"}, platform.EventWarning, platform.ReasonTeardownTimedOut, "left: x")
+	e.Event(t.Context(), platform.Object{Kind: "Secret", Name: "y"}, platform.EventNormal, platform.ReasonRunning, "z")
+	want := []string{"Cluster Warning TeardownTimedOut", "Secret Normal Running"}
+	if !slices.Equal(counter.seen, want) {
+		t.Fatalf("counted %v, want %v", counter.seen, want)
+	}
+}

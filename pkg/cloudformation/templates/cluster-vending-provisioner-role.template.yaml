@@ -23,7 +23,7 @@ Outputs:
     Value: !Ref 'Role'
   TemplateVersion:
     Description: 'The version of this template: the platform compares it with what it needs and says when the stack is to be updated'
-    Value: '1'
+    Value: '2'
 Parameters:
   CreateSpotServiceLinkedRole:
     AllowedValues:
@@ -117,6 +117,33 @@ Resources:
             Resource:
               - '*'
             Sid: CleanKarpenterInstanceProfiles
+          - Action:
+              - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:DescribeTargetGroups
+              - elasticloadbalancing:DescribeTags
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: ReadLoadBalancers
+          - Action:
+              - ec2:TerminateInstances
+            Condition:
+              'Null':
+                aws:ResourceTag/karpenter.sh/nodepool: 'false'
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: SweepKarpenterInstances
+          - Action:
+              - elasticloadbalancing:DeleteLoadBalancer
+              - elasticloadbalancing:DeleteTargetGroup
+            Condition:
+              'Null':
+                aws:ResourceTag/elbv2.k8s.aws/cluster: 'false'
+            Effect: Allow
+            Resource:
+              - '*'
+            Sid: SweepClusterLoadBalancers
           - Action:
               - iam:PassRole
             Condition:
@@ -407,7 +434,7 @@ Resources:
         - Key: cluster-vending.io/role
           Value: provisioner
         - Key: cluster-vending.io/template-version
-          Value: '1'
+          Value: '2'
         - Key: managed-by
           Value: cluster-vending
     Type: AWS::IAM::Role

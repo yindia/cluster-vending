@@ -789,6 +789,14 @@ spec:
                       clusterSecurityGroupID is the security group EKS created for the
                       cluster.
                     type: string
+                  karpenterNodeRole:
+                    description: |-
+                      karpenterNodeRole is the IAM role Karpenter's nodes run as, and
+                      karpenterNodeRoleARN its ARN, once it is Ready: what an EC2NodeClass
+                      the tenant makes names in spec.role.
+                    type: string
+                  karpenterNodeRoleARN:
+                    type: string
                   nodeGroupARN:
                     description: nodeGroupARN of the default node group.
                     type: string
@@ -1946,6 +1954,14 @@ spec:
                     description: startTime is when the upgrade was first seen in progress.
                     format: date-time
                     type: string
+                  tenantPoolsBehind:
+                    description: |-
+                      tenantPoolsBehind is a warning, not a wait: the tenant's Karpenter
+                      pools whose nodes run another kubelet minor, as "<pool> (<minor>)".
+                      They are the tenant's to roll.
+                    items:
+                      type: string
+                    type: array
                   toVersion:
                     description: |-
                       toVersion is the version being moved to

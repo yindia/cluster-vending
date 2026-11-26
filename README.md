@@ -71,7 +71,11 @@ runs the API server, controller, live reader and console in a management
 cluster that has Crossplane:
 
 ```sh
+# Login is required: put your OIDC issuer and audience in a copy of
+# charts/cluster-vending/ci/auth-values.yaml (platform.auth.mode: required).
+# On a local/dev cluster only, `--set allowInsecureNoAuth=true` runs without it.
 helm install cluster-vending charts/cluster-vending -n cluster-vending-system --create-namespace \
+  -f my-auth-values.yaml \
   --set aws.managementRoleArn=arn:aws:iam::<ACCOUNT>:role/cluster-vending-management
 kubectl -n cluster-vending-system port-forward svc/cluster-vending-ui 3000:3000
 ```

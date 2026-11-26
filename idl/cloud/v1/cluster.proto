@@ -492,6 +492,22 @@ message ClusterStatus {
   // deleted.
   ClusterTeardown teardown = 49;
 
+  // node_teardown is the node groups' stage of the deletion while the
+  // workload cluster's API does not answer: start_time is when it was
+  // first found so, kept across passes and restarts (the teardown timeout
+  // counts from it). Unset while the API answers, and once the stage is
+  // over.
+  ClusterTeardown node_teardown = 61;
+
+  // cloud_sweep is the deletion's sweep of the tenant account: Karpenter's
+  // EC2 instances and launch templates and the AWS Load Balancer
+  // Controller's load balancers, target groups and security groups,
+  // found by this cluster's tags and deleted with the tenant role, before
+  // Karpenter's node role is deleted. waiting are the IDs (instances,
+  // ARNs, security groups) still there; a sweep that timed out lists what
+  // it left. Unset until the deletion reaches it.
+  ClusterTeardown cloud_sweep = 62;
+
   // release_move is the cluster's move from the release its components
   // run (current) to the one its channel offers (target), one component
   // at a time; set by the controller when component upgrades are on.
@@ -753,6 +769,12 @@ message ClusterUpgrade {
   // version or values for this Kubernetes minor ("component versions
   // unchanged"). Informational: the upgrade still passes through them.
   repeated ClusterUpgradePhase skipped_steps = 13;
+
+  // A warning, not a wait: the Karpenter NodePools the tenant made (any
+  // but the platform's) whose nodes run a kubelet minor other than
+  // to_version, as "<pool> (<minor>)". They are the tenant's to roll; the
+  // node groups step does not wait for them.
+  repeated string tenant_pools_behind = 14;
 }
 
 // ClusterUpgradeNodeGroup is one node group following a Kubernetes

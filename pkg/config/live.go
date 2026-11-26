@@ -18,6 +18,7 @@ import (
 //	  url: http://cluster-vending-live:8090   # live-url
 //	  allowWithoutAuth: true                  # live-allowWithoutAuth (local only)
 //	  addr: :8090                             # live-addr (the live command)
+//	  metricsAddr: :8091                      # live-metricsAddr (the live command)
 const (
 	FlagLiveURL              = "live-url"
 	EnvLiveURL               = "CV_LIVE_URL"
@@ -26,7 +27,10 @@ const (
 	FlagLiveAddr             = "live-addr"
 	EnvLiveAddr              = "CV_LIVE_ADDR"
 	// DefaultLiveAddr is the live reader's listen address.
-	DefaultLiveAddr = ":8090"
+	DefaultLiveAddr        = ":8090"
+	FlagLiveMetricsAddr    = "live-metricsAddr"
+	EnvLiveMetricsAddr     = "CV_LIVE_METRICS_ADDR"
+	DefaultLiveMetricsAddr = "0"
 )
 
 // liveServeSettings are the API server's settings of the live reader.
@@ -43,6 +47,8 @@ var liveSettings = []Setting{
 		Usage: "YAML file with any of these settings, keyed by flag name; flags and environment variables win over it"},
 	{Flag: FlagLiveAddr, Env: EnvLiveAddr, Default: DefaultLiveAddr,
 		Usage: "listen address of the live reader's internal Connect endpoint, host:port"},
+	{Flag: FlagLiveMetricsAddr, Env: EnvLiveMetricsAddr, Default: DefaultLiveMetricsAddr,
+		Usage: "a second listen address serving only /metrics, /healthz and /readyz, host:port, so a scraper need not reach the internal endpoint; 0: none (/metrics stays on live-addr either way)"},
 	{Flag: FlagShutdownTimeout, Env: EnvShutdownTimeout, Default: DefaultShutdownTimeout.String(),
 		Usage: "how long in-flight requests get to finish on shutdown"},
 }
@@ -52,7 +58,9 @@ func LiveSettings() []Setting { return slices.Clone(liveSettings) }
 
 // Live is the validated configuration of the live reader.
 type Live struct {
-	Addr            string
+	Addr string
+	// MetricsAddr is the metrics-only listener; empty: none.
+	MetricsAddr     string
 	ShutdownTimeout time.Duration
 }
 
@@ -67,6 +75,12 @@ func LoadLive(flags, env, file LookupFunc) (Live, error) {
 	cfg.ShutdownTimeout = timeout
 	if _, _, err := net.SplitHostPort(cfg.Addr); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be host:port: %w", setting(FlagLiveAddr), err))
+	}
+	if m := v[FlagLiveMetricsAddr]; m != "" && m != "0" {
+		if _, _, err := net.SplitHostPort(m); err != nil {
+			errs = append(errs, fmt.Errorf("%s must be host:port or 0: %w", setting(FlagLiveMetricsAddr), err))
+		}
+		cfg.MetricsAddr = m
 	}
 	if len(errs) > 0 {
 		return Live{}, invalid(errs)

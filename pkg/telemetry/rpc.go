@@ -18,12 +18,17 @@ type RPC struct {
 	inflight *prometheus.GaugeVec
 }
 
-func NewRPC(reg prometheus.Registerer) *RPC {
+// NewRPC registers the API server's RPC metrics (cluster_vending_rpc_*).
+func NewRPC(reg prometheus.Registerer) *RPC { return NewRPCNamed(reg, "cluster_vending_rpc") }
+
+// NewRPCNamed registers the same RPC metrics under prefix: the live
+// reader's are cluster_vending_live_rpc_*.
+func NewRPCNamed(reg prometheus.Registerer, prefix string) *RPC {
 	labels := []string{"rpc_service", "rpc_method", "rpc_type"}
 	r := &RPC{
-		requests: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "cluster_vending_rpc_requests_total", Help: "Completed RPC calls, including streaming calls and authentication failures."}, append(append([]string{}, labels...), "code")),
-		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "cluster_vending_rpc_duration_seconds", Help: "RPC lifetime in seconds; streaming calls include the entire stream lifetime.", Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 300}}, labels),
-		inflight: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "cluster_vending_rpc_in_flight", Help: "RPC calls currently executing, including open streams."}, labels),
+		requests: prometheus.NewCounterVec(prometheus.CounterOpts{Name: prefix + "_requests_total", Help: "Completed RPC calls, including streaming calls and authentication failures."}, append(append([]string{}, labels...), "code")),
+		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: prefix + "_duration_seconds", Help: "RPC lifetime in seconds; streaming calls include the entire stream lifetime.", Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 300}}, labels),
+		inflight: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: prefix + "_in_flight", Help: "RPC calls currently executing, including open streams."}, labels),
 	}
 	reg.MustRegister(r.requests, r.duration, r.inflight)
 	return r

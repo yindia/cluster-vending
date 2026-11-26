@@ -30,7 +30,7 @@ func newLiveCmd(g *globals) *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return live.Run(ctx, live.Options{Addr: cfg.Addr, ShutdownTimeout: cfg.ShutdownTimeout,
+			return live.Run(ctx, live.Options{Addr: cfg.Addr, MetricsAddr: cfg.MetricsAddr, ShutdownTimeout: cfg.ShutdownTimeout,
 				Kubeconfig: g.cfg.Kubeconfig, KubeContext: g.cfg.KubeContext, Limits: live.DefaultLimits(), Logger: g.logger})
 		},
 	}

@@ -33,6 +33,19 @@ type Events struct {
 	// reader finds the object an event is about, for its UID: without it
 	// `kubectl describe` does not list the event with the object.
 	reader client.Reader
+	// counter counts every event by kind, type and reason
+	// (telemetry.Controller); nil counts nothing.
+	counter EventCounter
+}
+
+// EventCounter counts the events emitted (cluster_vending_events_total).
+type EventCounter interface {
+	Event(kind, eventType, reason string)
+}
+
+// Counted returns e counting every event it emits with counter.
+func (e *Events) Counted(counter EventCounter) *Events {
+	return &Events{recorder: e.recorder, reader: e.reader, counter: counter}
 }
 
 // NewEvents returns the Events that record with recorder
@@ -45,7 +58,13 @@ func NewEvents(recorder events.EventRecorder, reader client.Reader) *Events {
 // cluster's last event) is referred to by its name alone; a kind the
 // controller does not know is dropped.
 func (e *Events) Event(ctx context.Context, obj platform.Object, eventType, reason, message string) {
-	if e == nil || e.recorder == nil {
+	if e == nil {
+		return
+	}
+	if e.counter != nil {
+		e.counter.Event(obj.Kind, eventType, reason)
+	}
+	if e.recorder == nil {
 		return
 	}
 	regarding := objectOf(obj)

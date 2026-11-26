@@ -65,10 +65,18 @@ aws:
 #
 # The default is config/node-groups/platform.yaml (config/helm_chart_test.go
 # keeps them equal). Helm merges maps: to drop a default key, set it to null.
+# LOCAL/DEV ONLY. The chart refuses to render an API without login unless
+# this is true: with server.enabled, platform.auth.mode must be required;
+# and ui.ingress.enabled needs ui.auth.enabled. Without login every caller
+# is anonymous and may call every RPC for every tenant (freeze the
+# platform, delete any cluster, read account external IDs). NOTES.txt
+# prints a warning when it is set. ci/kind-values.yaml sets it for kind.
+allowInsecureNoAuth: false
+
 platform:
-  # Authentication of the API (docs/architecture.md#authentication). Absent:
-  # mode none, every caller is anonymous and may call everything; keep the
-  # Services internal then. Example:
+  # Authentication of the API (docs/architecture.md#authentication).
+  # Required: the render fails without mode required, unless
+  # allowInsecureNoAuth (local/dev only). Example:
   # auth:
   #   mode: required
   #   issuers:
@@ -214,9 +222,10 @@ controller:
   # Create or update the shipped ComponentDefinitions on start.
   installCatalog: true
   # Prometheus metrics (plain HTTP, unauthenticated) on :8080 behind a
-  # Service <fullname>-controller-metrics. Off, as the command's default.
+  # Service <fullname>-controller-metrics (docs/architecture.md#metrics-and-alerts).
+  # On: the fleet, rollout and transition metrics come from the controller.
   metrics:
-    enabled: false
+    enabled: true
     port: 8080
   # Extra CV_* variables of the controller command. No AWS keys: the
   # controller's credentials are its service account's IAM role.
@@ -275,6 +284,12 @@ live:
   enabled: true
   service:
     port: 8090
+  # /metrics (and the probes) on a port of their own (live-metricsAddr), so
+  # Prometheus can scrape the reader without reaching its internal endpoint:
+  # networkPolicy.metricsFrom reaches this port only.
+  metrics:
+    enabled: true
+    port: 8091
   extraEnv: []
   serviceAccount:
     # Fixed name cluster-vending-live: the controller binds it in tenant
@@ -408,11 +423,12 @@ networkPolicy:
   # its egress is DNS and HTTPS (443, 6443). On by default, as config/live.
   live: true
   # The API server accepts the console's pods plus `server.from` peers
-  # (an ingress controller, in-cluster CLI users). Off by default: other
-  # in-cluster callers would be cut off. kubectl port-forward is not
-  # affected (it enters the pod's network namespace).
+  # (an ingress controller, in-cluster CLI users, Prometheus scraping
+  # /metrics). On by default: no other pod of the cluster reaches it.
+  # kubectl port-forward is not affected (the kubelet connects inside the
+  # pod's network namespace), so the CLI path of NOTES.txt keeps working.
   server:
-    enabled: false
+    enabled: true
     from: []
     # - namespaceSelector:
     #     matchLabels:
@@ -421,6 +437,34 @@ networkPolicy:
   ui:
     enabled: false
     from: []
-  # The controller's metrics port only from namespaces labelled
-  # metrics=enabled (config/network-policy); the probe port stays open.
+  # The controller's metrics port only from networkPolicy.metricsFrom
+  # (config/network-policy); the probe port stays open.
   controllerMetrics: false
+  # Who reaches the metrics ports: the live reader's metrics port (with
+  # networkPolicy.live) and the controller's (with controllerMetrics).
+  # Label Prometheus's namespace metrics=enabled, or list its peer here (an
+  # empty list admits every peer, to the metrics ports only). The
+  # API server's /metrics shares the API port: add Prometheus to
+  # networkPolicy.server.from.
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          metrics: enabled
+
+# ---------------------------------------------------------------------------
+# Prometheus Operator objects (docs/architecture.md#metrics-and-alerts). Both
+# need the monitoring.coreos.com CRDs; off by default.
+metrics:
+  # ServiceMonitors for the API server, the controller (controller.metrics)
+  # and the live reader (live.metrics).
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # Extra labels, e.g. the release label your Prometheus selects.
+    labels: {}
+  # The platform's alerts (files/prometheus-rules.yaml, the same as
+  # config/prometheus/rules.yaml).
+  prometheusRule:
+    enabled: false
+    labels: {}

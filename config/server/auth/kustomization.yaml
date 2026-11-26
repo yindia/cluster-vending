@@ -1,4 +1,7 @@
-# Opt-in OIDC authentication (no roles). Customize platform.yaml for your issuer before use.
+# The API server to deploy (production): ../base with OIDC authentication
+# required (no roles). Replace the issuer and audience in platform.yaml
+# before use. `make deploy-manifests` renders this overlay; ../base alone
+# runs auth mode none and is for local development only.
 # It replaces the base's platform-config with the same nodeGroups plus the
 # auth section (the server reads one --config file).
 apiVersion: kustomize.config.k8s.io/v1beta1

@@ -84,6 +84,10 @@ spec:
         env:
         - name: CV_LIVE_ADDR
           value: ":8090"
+        {{- if $l.metrics.enabled }}
+        - name: CV_LIVE_METRICS_ADDR
+          value: ":{{ $l.metrics.port }}"
+        {{- end }}
         - name: CV_LOG_FORMAT
           value: {{ .Values.log.format | quote }}
         - name: CV_LOG_LEVEL
@@ -95,6 +99,11 @@ spec:
         - name: http
           containerPort: 8090
           protocol: TCP
+        {{- if $l.metrics.enabled }}
+        - name: metrics
+          containerPort: {{ $l.metrics.port }}
+          protocol: TCP
+        {{- end }}
         volumeMounts:
         - name: tmp
           mountPath: /tmp
@@ -110,7 +119,8 @@ spec:
       - name: tmp
         emptyDir: {}
 ---
-# Internal only: the API server is its one caller.
+# Internal only: the API server is its one caller; Prometheus scrapes the
+# metrics port (live.metrics).
 apiVersion: v1
 kind: Service
 metadata:
@@ -125,6 +135,12 @@ spec:
     port: {{ $l.service.port }}
     protocol: TCP
     targetPort: http
+  {{- if $l.metrics.enabled }}
+  - name: metrics
+    port: {{ $l.metrics.port }}
+    protocol: TCP
+    targetPort: metrics
+  {{- end }}
   selector:
     {{- include "cv.selectorLabels" $ctx | nindent 4 }}
 {{- end }}

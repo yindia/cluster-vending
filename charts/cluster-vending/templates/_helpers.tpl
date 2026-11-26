@@ -160,6 +160,13 @@ securityContext:
 
 {{/* Checks of value combinations the schema cannot express. */}}
 {{- define "cv.validate" -}}
+{{- $auth := default dict (default dict .Values.platform).auth -}}
+{{- if and .Values.server.enabled (ne (toString (default "" $auth.mode)) "required") (not .Values.allowInsecureNoAuth) -}}
+{{- fail "platform.auth.mode must be required: without it every caller of the API is anonymous and may call every RPC for every tenant (freeze the platform, delete any cluster, read account external IDs). Set platform.auth (mode: required and issuers; docs/architecture.md#authentication), or allowInsecureNoAuth: true on a local/dev cluster only" -}}
+{{- end -}}
+{{- if and .Values.ui.enabled .Values.ui.ingress.enabled (not .Values.ui.auth.enabled) (not .Values.allowInsecureNoAuth) -}}
+{{- fail "ui.ingress.enabled needs ui.auth.enabled: an Ingress would publish the console, and through it the whole API, without login. Turn ui.auth on, or set allowInsecureNoAuth: true on a local/dev cluster only" -}}
+{{- end -}}
 {{- if and .Values.controller.enabled (gt (int .Values.controller.replicas) 1) (not .Values.controller.leaderElect) -}}
 {{- fail "controller.replicas > 1 needs controller.leaderElect: two controllers must not reconcile at once" -}}
 {{- end -}}

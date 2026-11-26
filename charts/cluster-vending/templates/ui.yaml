@@ -70,6 +70,12 @@ spec:
           value: {{ include "cv.apiBaseURL" . | quote }}
         - name: AUTH_ENABLED
           value: {{ $u.auth.enabled | quote }}
+        {{- if and $u.ingress.enabled (not $u.auth.enabled) $u.ingress.hosts }}
+        {{- /* Login off: the RPC route accepts loopback hosts (port-forward) and this one origin only. */}}
+        {{- $host := (index $u.ingress.hosts 0).host }}
+        - name: CV_PUBLIC_ORIGIN
+          value: {{ printf "%s://%s" (ternary "https" "http" (gt (len $u.ingress.tls) 0)) $host | quote }}
+        {{- end }}
         {{- if $u.auth.enabled }}
         - name: AUTH_URL
           value: {{ $u.auth.url | quote }}

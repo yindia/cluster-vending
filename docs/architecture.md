@@ -2004,9 +2004,10 @@ helm install cluster-vending charts/cluster-vending \
   `kubectl -n cluster-vending-system port-forward svc/cluster-vending-ui 3000:3000`.
   For the CLI: `kubectl -n cluster-vending-system port-forward svc/cluster-vending-server 8080:8080`,
   then `cluster-vending --server http://localhost:8080 ...`. With login off, the
-  RPC route accepts an `Origin` that names the host the browser addressed (`Host`;
-  `X-Forwarded-Host` only with `CV_TRUST_FORWARDED_HEADERS=true`), plus
-  `CV_PUBLIC_ORIGIN` if set, so any port-forward or Ingress host works. With web
+  RPC route accepts an `Origin` only for a loopback host the browser addressed
+  (`localhost`, `*.localhost`, `127.0.0.1`, `[::1]`: a port-forward) or exactly
+  `CV_PUBLIC_ORIGIN`, which the chart sets from the first Ingress host. Any other
+  host is refused (DNS rebinding), and forwarded headers are never consulted. With web
   login on, it accepts the `AUTH_URL` origin only, and the console needs HTTPS URLs:
   use `ui.ingress` with TLS.
 - **One release per management cluster**: the names the controller binds in tenant

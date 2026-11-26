@@ -85,13 +85,14 @@ A port-forward enters the pod's network namespace, so the network policies do
 not block it.
 
 The console's RPC route refuses a request whose `Origin` is not its own. With
-login off, "its own" is the host the browser addressed (the `Host` header), so a
-port-forward or an Ingress works with no setting: a page on any other origin, or a
-request marked `Sec-Fetch-Site: cross-site`, is refused. Two optional settings,
-through `ui.extraEnv`: `CV_PUBLIC_ORIGIN` (e.g. `https://console.example.com`)
-accepts that origin as well, and `CV_TRUST_FORWARDED_HEADERS=true` checks the first
-`X-Forwarded-Host`/`X-Forwarded-Proto` instead of `Host`. Set the latter only when
-an ingress in front of the console sets those headers itself. With login on, the
+login off, it accepts only a loopback host the browser addressed (`localhost`,
+`*.localhost`, `127.0.0.1`, `[::1]`, as with a port-forward), or exactly
+`CV_PUBLIC_ORIGIN`. Any other host is refused, which stops DNS rebinding: a page
+whose own name points at 127.0.0.1 is not loopback. With `ui.ingress.enabled` and
+login off, the chart sets `CV_PUBLIC_ORIGIN` from the first Ingress host (https when
+`tls` is set); set it through `ui.extraEnv` for anything else. Forwarded headers
+are never consulted. Requests marked `Sec-Fetch-Site: cross-site` are always
+refused. With login on, the
 route accepts the `AUTH_URL` origin only.
 
 With web login on (`ui.auth.enabled`), the console refuses plain-HTTP URLs in

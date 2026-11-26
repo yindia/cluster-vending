@@ -15,17 +15,11 @@ function failure(status: number, code: string, message: string) {
 export type OriginOptions = {
   /** Login on: the console's AUTH_URL origin, the only Origin accepted. */
   trustedOrigin?: string;
-  /** Login off: an extra accepted origin. Default: env CV_PUBLIC_ORIGIN. */
+  /** Login off: the one non-loopback origin accepted (an Ingress host). Default: env CV_PUBLIC_ORIGIN. */
   publicOrigin?: string;
-  /** Login off: use X-Forwarded-Host/-Proto instead of Host. Default: env CV_TRUST_FORWARDED_HEADERS=true. */
-  trustForwardedHeaders?: boolean;
 };
 
 type OriginDecision = "allow" | "deny" | "misconfigured";
-
-function firstValue(header: string | null): string | undefined {
-  return header?.split(",")[0]?.trim() || undefined;
-}
 
 function parseOrigin(value: string): string | undefined {
   try {
@@ -35,16 +29,23 @@ function parseOrigin(value: string): string | undefined {
   } catch { return undefined; }
 }
 
+/** Hosts a browser can only reach on the caller's own machine. */
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "[::1]";
+}
+
 /**
  * Whether a browser Origin may call the bridge. With login on, only the
- * configured AUTH_URL origin passes (unchanged). With login off, the Origin
- * must name the host the request was addressed to: the Host header, or the
- * first X-Forwarded-Host (and -Proto) only when forwarded headers are
- * explicitly trusted. request.url is not used: Next's standalone server builds
- * it from its listen address (http://0.0.0.0:3000), not from the browser's
- * host. From Host alone the scheme is unknown (TLS may end at an Ingress), so
- * only the host part is compared; browsers mark a scheme change as
- * Sec-Fetch-Site: cross-site, which is refused separately.
+ * configured AUTH_URL origin passes (unchanged). With login off there is no
+ * session to protect, so the guard is about which page may drive the API:
+ * the Origin must name the Host the request was addressed to AND that host
+ * must be a loopback name (localhost, *.localhost, 127.0.0.1, [::1], as with a
+ * port-forward), or the Origin must equal CV_PUBLIC_ORIGIN exactly. A page
+ * whose own name points at 127.0.0.1 (DNS rebinding) sends its own name as
+ * both Host and Origin, which is not loopback, so it is refused. Forwarded
+ * headers are never consulted. request.url is not used: Next's standalone
+ * server builds it from its listen address (http://0.0.0.0:3000).
  */
 export function checkOrigin(request: Request, options: OriginOptions = {}): OriginDecision {
   const origin = request.headers.get("Origin");
@@ -59,14 +60,9 @@ export function checkOrigin(request: Request, options: OriginOptions = {}): Orig
   }
   const parsed = parseOrigin(origin);
   if (!parsed || parsed !== origin) return "deny";
-  const trustForwarded = options.trustForwardedHeaders ?? process.env.CV_TRUST_FORWARDED_HEADERS === "true";
-  if (trustForwarded) {
-    const host = firstValue(request.headers.get("X-Forwarded-Host"));
-    const proto = firstValue(request.headers.get("X-Forwarded-Proto"));
-    if (host) return (proto ? origin === `${proto.toLowerCase()}://${host.toLowerCase()}` : new URL(origin).host === host.toLowerCase()) ? "allow" : "deny";
-  }
   const host = request.headers.get("Host")?.trim().toLowerCase();
-  return host && new URL(origin).host === host ? "allow" : "deny";
+  const url = new URL(origin);
+  return host && url.host === host && isLoopbackHost(url.hostname) ? "allow" : "deny";
 }
 
 /** Fixed-upstream, allowlisted Connect bridge. No cookies or shared identity. */

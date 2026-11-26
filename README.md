@@ -1,73 +1,103 @@
 # cluster-vending
 
-cluster-vending creates AWS networks and EKS clusters for tenants by writing
-Crossplane managed resources into a management cluster. It can also import an
+cluster-vending is a platform for vending AWS networks and EKS clusters to
+tenants. Tenants ask for a network or a cluster through an API, a CLI or a web
+console. The platform creates it with Crossplane from a management cluster,
+installs and upgrades the platform's components on it, and keeps it current
+through release channels rolled out tier by tier. It can also import an
 existing VPC or EKS cluster read-only and take it over later.
 
-One binary runs three roles: the API server (`serve`), the controller
-(`controller`), and the CLI that calls the API. A tenant console lives in
-[`ui/`](ui/README.md). Nothing here has run against a real AWS account.
+Status: run end to end against a real AWS account from a local management
+cluster; not yet run in production.
 
-The design, the CRDs, configuration, operations and known limits are in
-**[docs/architecture.md](docs/architecture.md)**.
+## What it does
 
-## Prerequisites
+| Area | What the platform does |
+|---|---|
+| **Accounts** | Onboards a tenant's AWS account through an IAM role it creates with a CloudFormation stack the CLI prints, then verifies access. |
+| **Networks** | VPC, subnets, gateways, routes and flow logs, from a layout; import an existing VPC. |
+| **Clusters** | EKS with encryption, logging, access entries, OIDC, IRSA and EKS add-ons. Node groups are the platform's: a fixed-size system group (Karpenter and the EKS add-ons) and Karpenter's `platform-pool` (everything else). |
+| **Components** | A catalog of Helm charts (Karpenter, the AWS Load Balancer Controller, Istio, Kyverno, External Secrets, Capsule, the GPU Operator, …) installed in order and kept at the versions their release pins. Tenants enable the tenant ones; the platform installs its own. |
+| **Releases and upgrades** | Channels (alpha, beta, stable) offer releases; changes reach clusters tier by tier, with soak, maintenance windows and freezes. Kubernetes upgrades are automatic on a channel. Older minors are offered as extended support, upgraded by hand. |
+| **Sub-tenants** | Namespace tenancy inside a cluster (Capsule), with their own access. |
+| **Insights** | Live node lists, deprecated-API scans, resource recommendations from a week of usage, and policy violations. |
+| **Import and takeover** | Observe an existing cluster read-only, then take it over without recreating it. |
 
-- Go (see `go.mod`).
-- `buf` for the protos (`make generate`, `make lint`).
-- For a local management cluster: `docker`, `kind`, `kubectl`, `helm`.
-- `golangci-lint`; `make lint` uses the one on `PATH` or `bin/golangci-lint`.
+## How it runs
+
+One binary, `cluster-vending`, runs every process. The management cluster's
+custom resources are its only storage; there is no database.
+
+| Process | Command | Does |
+|---|---|---|
+| API server | `serve` | Validates and stores requests; serves the API (Connect/gRPC). Holds no AWS or workload-cluster credentials. |
+| Controller | `controller` | Reconciles everything: renders Crossplane resources, installs components, rolls out upgrades, deletes in order. The only process that changes AWS. |
+| Live reader | `live` | Reads node lists and totals from workload clusters, read-only, for the API. |
+| CLI | `cluster-vending <group> <verb>` | Calls the API: `tenant`, `account`, `network`, `cluster`, `component`, `subtenant`, `admin`. |
+| Console | [`ui/`](ui/README.md) | The tenant web console (Next.js), at port 3000. |
+
+## Quickstart (local)
+
+Prerequisites: Go (see `go.mod`), Node.js, `buf`, `golangci-lint`, `docker`,
+`kind`, `kubectl`, `helm`, the AWS CLI.
+
+```sh
+make kind-up                                   # kind + Crossplane
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...   # in each process's shell, never in a file
+
+make run-controller     # shell 1: installs CRDs, providers and the catalog on start
+make run                # shell 2: API server on :8080
+make run-ui             # shell 3: console on http://localhost:3000
+```
+
+Then, with the CLI (each command has `--help`; edit the IDs in `examples/` first):
+
+```sh
+bin/cluster-vending tenant create acme
+bin/cluster-vending account create -f examples/cloudaccount.yaml   # prints the role stacks to create
+bin/cluster-vending account verify --id <BOOTSTRAP_ID> --tenant acme --wait
+bin/cluster-vending network create -f examples/network.yaml --wait
+bin/cluster-vending cluster create -f examples/cluster.yaml --wait
+```
+
+The full setup, both AWS credential modes (your own keys, or assumed roles like
+production), another management cluster or account, and troubleshooting are in
+**[docs/local-development.md](docs/local-development.md)**.
+
+## Deploy
+
+The Helm chart [`charts/cluster-vending`](charts/cluster-vending/README.md)
+runs the API server, controller, live reader and console in a management
+cluster that has Crossplane:
+
+```sh
+helm install cluster-vending charts/cluster-vending -n cluster-vending-system --create-namespace \
+  --set aws.managementRoleArn=arn:aws:iam::<ACCOUNT>:role/cluster-vending-management
+kubectl -n cluster-vending-system port-forward svc/cluster-vending-ui 3000:3000
+```
+
+The management account's IAM roles come from templates the CLI prints:
+`bin/cluster-vending account create --management`. See
+[docs/architecture.md#install-with-helm](docs/architecture.md#install-with-helm).
 
 ## Build and check
 
 | Command | What it does |
 |---|---|
 | `make build` | Builds `bin/cluster-vending`. |
-| `make check` | Lint, `go vet` and the unit tests. Run before every commit. |
-| `make test` | Unit tests with the race detector. No cluster needed. |
-| `make help` | Lists every target. |
+| `make check` | buf, lint, vet and every unit test. Run before every commit. |
+| `make test` | Unit tests with the race detector; no cluster needed. |
+| `make generate`, `make controller-apis` | Regenerate the API code and the CRDs. |
+| `make docker-build`, `make docker-build-ui` | The images. |
+| `make help` | Every target. |
 
-## Quickstart
+## Read more
 
-Three terminals against a kind cluster. The controller is the only process that
-talks to AWS; the API server validates and stores.
-
-```sh
-make kind-up                # kind with Crossplane (hack/start.sh)
-export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...   # in the shell only
-
-make run-controller         # terminal 1: hack/config.local.yaml
-make run                    # terminal 2: API server, after the controller installed the CRDs
-```
-
-Then the CLI (terminal 3). Manifests are in `examples/`; each command has `--help`:
-
-```sh
-bin/cluster-vending tenant create acme
-bin/cluster-vending account create -f examples/cloudaccount.yaml   # prints the role stacks to create (provisioner, then the recommended reader)
-bin/cluster-vending account verify --id BOOTSTRAP_ID --tenant acme --wait
-bin/cluster-vending network create -f examples/network.yaml --wait
-bin/cluster-vending cluster create -f examples/cluster.yaml --wait
-```
-
-The local setup, the AWS credential modes, login and the console are described in
-[docs/architecture.md#run-locally](docs/architecture.md#run-locally) and
-[docs/architecture.md#aws-credentials](docs/architecture.md#aws-credentials).
-
-## Deploy
-
-The Helm chart [`charts/cluster-vending`](charts/cluster-vending/README.md) runs the
-API server, the controller, the live reader and the console in a management cluster
-with Crossplane installed. See
-[docs/architecture.md#install-with-helm](docs/architecture.md#install-with-helm).
-
-## Where to read more
-
-- [docs/local-development.md](docs/local-development.md): running the controller,
-  API and console locally against a management cluster and AWS account of your
-  choice, and troubleshooting.
-
-- [docs/architecture.md](docs/architecture.md): what exists, how it works, the
-  custom resources, configuration, operations and known limits.
-- [idl/README.md](idl/README.md): the `cloud.v1` contract.
-- [ui/README.md](ui/README.md): the tenant console.
+- [docs/architecture.md](docs/architecture.md): how it works, the custom
+  resources, configuration, operations and known limits.
+- [docs/local-development.md](docs/local-development.md): local setup and
+  troubleshooting.
+- [docs/proposals/](docs/proposals): design proposals.
+- [idl/README.md](idl/README.md): the `cloud.v1` API.
+- [ui/README.md](ui/README.md): the console.
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to make and check a change.

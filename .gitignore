@@ -12,3 +12,6 @@
 
 # Local agent session transcripts are not project source.
 /*-this-session-is-being-continued-from-a-previous-*.txt
+
+# Personal local settings (docs/local-development.md)
+/hack/config.mine.yaml

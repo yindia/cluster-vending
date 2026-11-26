@@ -327,9 +327,20 @@ func SpecVersion(c *cloudv1alpha1.Cluster) string {
 	return c.Spec.ControlPlane.KubernetesVersion
 }
 
+// conditionEditRefused is the Cluster condition of an edit the controller
+// refused (controller.ConditionEditRefused).
+const conditionEditRefused = "EditRefused"
+
 // facts are what upgrade.Check reads of a cluster moving to target.
 func (in memberInputs) facts(c *cloudv1alpha1.Cluster, target string) upgrade.Facts {
-	f := upgrade.Facts{Mode: upgrade.Mode(c.Spec.UpgradeMode), Target: target,
+	mode := upgrade.Mode(c.Spec.UpgradeMode)
+	if meta.IsStatusConditionTrue(c.Status.Conditions, conditionEditRefused) {
+		// The object's edit is refused and not applied (an automatic
+		// cluster on a minor on no channel): it is not taken for a request
+		// to upgrade automatically.
+		mode = upgrade.Manual
+	}
+	f := upgrade.Facts{Mode: mode, Target: target,
 		Ready:         meta.IsStatusConditionTrue(c.Status.Conditions, "Ready") || c.Status.Phase == cloudv1alpha1.ClusterPhaseRunning,
 		PlatformReady: platformReady(c),
 		SummaryWait:   clustersummary.Wait(convert.SummaryFromAPI(&c.Status), in.now),

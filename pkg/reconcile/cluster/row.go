@@ -127,6 +127,9 @@ func (s *Reconciler) NewRow(ctx context.Context, req *cloudv1.CreateClusterReque
 	if err := s.withChannelVersion(ctx, requested); err != nil {
 		return nil, err
 	}
+	if err := s.CheckExtendedSupport(ctx, requested, nil); err != nil {
+		return nil, err
+	}
 	if err := s.withIRSA(ctx, requested); err != nil {
 		return nil, err
 	}

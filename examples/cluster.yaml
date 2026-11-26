@@ -58,6 +58,9 @@ spec:
   # RELEASE_CHANNEL_UNSPECIFIED: automatic follows Stable; manual follows none.
   # Modes: UPGRADE_MODE_MANUAL, UPGRADE_MODE_AUTOMATIC; UNSPECIFIED means MANUAL.
   # Automatic version movement follows platform rollout gates and controller settings.
+  # A minor the release offers on no channel (extended support, e.g. an older
+  # 1.34 listed in release.yaml without a channel) runs with UPGRADE_MODE_MANUAL
+  # only: AUTOMATIC on it is refused. Upgrade to a channel's minor first.
   # maintenanceWindow:                      # when an automatic upgrade may start (UTC); unset: any time
   #   days: [WEEKDAY_SATURDAY, WEEKDAY_SUNDAY]   # empty: every day
   #   start: "02:00"                        # HH:MM, UTC
@@ -115,6 +118,9 @@ spec:
     upgradePolicy:
       supportType: AWS_SUPPORT_TYPE_STANDARD
       # Alternative: AWS_SUPPORT_TYPE_EXTENDED (paid extended support).
+      # Unset: EKS's default, rendered as EXTENDED on a minor on no release channel
+      # (extended support), where STANDARD is refused because AWS upgrades the
+      # control plane by force when standard support ends.
     # EKS add-ons. Every cluster gets the default set of pkg/crossplane/aws/addons.yaml
     # (vpc-cni, coredns, kube-proxy, eks-pod-identity-agent, aws-ebs-csi-driver); entries
     # here are merged into it by name. The platform places the add-ons' controller pods

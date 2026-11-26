@@ -217,6 +217,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	versionBefore, encryptionBefore := spec.GetControlPlane().GetKubernetesVersion(), corecluster.Encryption(spec)
 	addonsBefore := slices.Clone(spec.GetAws().GetAddons())
 	channelBefore := spec.GetReleaseChannel()
+	specBefore := proto.CloneOf(spec)
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
@@ -248,6 +249,11 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 		if err := s.CheckChannelVersion(ctx, spec, versionBefore); err != nil {
 			return nil, err
 		}
+	}
+	// An extended-support minor (on no channel) runs Manual, on EKS
+	// extended support.
+	if err := s.CheckExtendedSupport(ctx, spec, specBefore); err != nil {
+		return nil, err
 	}
 	// Only the channel's rollout finishes its upgrade record: moved to
 	// another channel, an upgrade in progress would stay so.

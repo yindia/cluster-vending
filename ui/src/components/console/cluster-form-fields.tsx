@@ -120,7 +120,7 @@ function SettingsStep(props: ClusterFieldsProps) {
         ]} />
         <Selector label="Upgrades" value={value.upgradeMode} isDisabled={disabled} onChange={(next) => onChange("upgradeMode", next)} options={[{ value: "1", label: "Manual (default)" }, { value: "2", label: "Automatic" }]} />
       </FormLayout>
-      {!automatic && text("kubernetesVersion", "Kubernetes minor version", `Optional, for example 1.33. Leave empty for the server default.${running ? ` Running ${running}.` : ""}`, { placeholder: running ? `Server default (running ${running})` : "Server default" })}
+      {!automatic && text("kubernetesVersion", "Kubernetes minor version", `Optional, for example 1.33. Leave empty for the server default. A minor on no release channel (extended support) runs with Manual upgrades only.${running ? ` Running ${running}.` : ""}`, { placeholder: running ? `Server default (running ${running})` : "Server default" })}
       {choice("awsSupportType", "AWS support policy", enumOptions(AwsSupportTypeSchema), undefined, "Extended support keeps an older Kubernetes version past standard support, at extra cost.")}
     </Section>
     <Section title="Node groups" description={platformNodeGroupsNote} />

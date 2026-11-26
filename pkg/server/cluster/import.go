@@ -140,6 +140,12 @@ func (s *ClusterService) TakeOverCluster(ctx context.Context, req *cloudv1.TakeO
 			return nil, err
 		}
 	}
+	// Once taken over, the platform renders the EKS cluster: on an
+	// extended-support minor (one on no channel) it must be Manual and on
+	// extended support. A read-only import is not checked.
+	if err := s.CheckExtendedSupport(ctx, spec, nil); err != nil {
+		return nil, reconcilecluster.ForTakeover(err)
+	}
 	// The row only: once anything is owned the cluster is no longer an
 	// imported, read-only one (deleting that leaves the cloud alone), so
 	// the reconciler owns the carried-over objects and renders the rest

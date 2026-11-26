@@ -69,6 +69,10 @@ type Target struct {
 	SubnetIDs []string
 	// SubnetObjects are the Subnet managed resources of SubnetIDs.
 	SubnetObjects []string
+	// ExtendedSupport is true when the spec's Kubernetes minor is on no
+	// channel of its release (extended.go): an unset supportType renders
+	// as EXTENDED.
+	ExtendedSupport bool
 }
 
 // Target loads the cluster's network and account and picks its subnets.
@@ -138,7 +142,12 @@ func (s *Reconciler) targetIn(ctx context.Context, tenantID string, n *model.Net
 	if err != nil {
 		return Target{}, fault.New(fault.FailedPrecondition, fmt.Sprintf("network %s: %v", n.ID, err))
 	}
-	return Target{Network: n, Account: account, Zones: zones, SubnetIDs: ids, SubnetObjects: corecluster.SubnetObjectNames(subnets, ids)}, nil
+	_, extended, err := s.extendedOffer(ctx, spec)
+	if err != nil {
+		return Target{}, err
+	}
+	return Target{Network: n, Account: account, Zones: zones, SubnetIDs: ids, SubnetObjects: corecluster.SubnetObjectNames(subnets, ids),
+		ExtendedSupport: extended}, nil
 }
 
 // RenderPlan is the plan of the cluster's resources: the resolved spec on
@@ -146,6 +155,11 @@ func (s *Reconciler) targetIn(ctx context.Context, tenantID string, n *model.Net
 func (s *Reconciler) RenderPlan(spec *cloudv1.ClusterSpec, row *model.Cluster, t Target) crossplaneaws.ClusterPlan {
 	p := corecluster.RenderPlan(spec, t.SubnetIDs, s.Base(row, t.Account))
 	p.SubnetObjects = t.SubnetObjects
+	if p.SupportType == "" && t.ExtendedSupport {
+		// An extended-support minor stays on extended support: with
+		// STANDARD, AWS would upgrade the control plane by force.
+		p.SupportType = supportTypeExtended
+	}
 	// A cluster taken over gets the platform components, Karpenter's among
 	// them: its queue and node role exist for the chart's values. One that
 	// is only observed, or taken over without them, is left as it is.

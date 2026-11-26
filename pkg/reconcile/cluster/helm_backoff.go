@@ -69,7 +69,14 @@ func (s *Reconciler) backoff(ctx context.Context, row *model.Cluster, namespace,
 	}
 	st := stateOf(prev, d)
 	st.GaveUp = st.Counted >= policy.Limit()
-	obs := helmrel.Observation{Digest: d.Digest, Ready: d.Ready && d.Synced && d.HelmState == crossplaneaws.HelmDeployed,
+	// Ready is the platform's readiness (rollout): Helm deployed the chart
+	// and its workloads are available. A rollout past its install timeout
+	// is the failure a failed Helm wait was: its error is the attempt's.
+	r := s.gateOf(ctx, row, namespace).rollout(ctx, object, d)
+	if r.TimedOut && d.LastError == "" {
+		d.LastError, c.LastError = r.Message, r.Message
+	}
+	obs := helmrel.Observation{Digest: d.Digest, Ready: r.Ready,
 		HelmState: d.HelmState, Failures: d.Failures, Error: d.LastError, Paused: d.Paused || d.PausedByUs,
 		PausedByUs: d.PausedByUs, BackoffUntil: d.BackoffUntil, Timeout: d.Timeout}
 	dec := helmrel.Step(st, obs, policy, at, helmJitter())

@@ -17,8 +17,9 @@ const (
 	// version not found, pull failed). Retried with backoff and reported;
 	// it never makes the platform give up, the chart may come back.
 	ClassChart ErrorClass = "chart"
-	// ClassRelease: Helm ran and the release failed (a hook failed, the
-	// rollout timed out, values are invalid). Counted.
+	// ClassRelease: Helm ran and the release failed (a hook failed, values
+	// are invalid), or its workloads did not roll out within the install
+	// timeout (RolloutTimedOut). Counted.
 	ClassRelease ErrorClass = "release"
 )
 
@@ -78,6 +79,10 @@ func Classify(message string) ErrorClass {
 	switch {
 	case m == "":
 		return ClassNone
+	case strings.HasPrefix(m, rolloutTimedOutPrefix):
+		// The platform's own error (RolloutTimedOut): whatever the workload
+		// it names says, the release did not roll out in time.
+		return ClassRelease
 	case containsAny(m, transientPhrases):
 		return ClassTransient
 	case containsAny(m, chartPhrases):

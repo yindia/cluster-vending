@@ -250,7 +250,7 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	if err != nil {
 		return nil, err
 	}
-	components, objects := platformStatus(in, plan, skipped, res, views)
+	components, objects := platformStatus(in, plan, skipped, res, views, s.rolloutOf(ctx, gate))
 	for _, pc := range components {
 		if c, ok := plannedComponent(plan, pc.GetName()); ok {
 			gate.markUnchanged(pc, plan, c)
@@ -261,6 +261,15 @@ func (s *Reconciler) installPlatform(ctx context.Context, row *model.Cluster) (*
 	s.describe(ctx, row, in.Plan.Namespace, p, objects)
 	explainTakenOver(row, p.components)
 	return p, nil
+}
+
+// rolloutOf is the readiness of the cluster's Release objects (by name) as
+// the management cluster has them now, through the pass's gate: what a
+// component's phase is read from.
+func (s *Reconciler) rolloutOf(ctx context.Context, gate *helmGate) func(object string) readiness {
+	return func(object string) readiness {
+		return gate.rollout(ctx, object, s.releaseDetail(ctx, gate.namespace, object))
+	}
 }
 
 // pinReleaseAttempts bounds the re-reads of pinRelease when the row changes
@@ -320,12 +329,15 @@ func unavailable(entries []component.PlatformEntry, release, problem string) *pl
 
 // platformStatus is the state of each Platform component, in install
 // order: left out (FAILED, why), waiting (PENDING, what for), being
-// installed (INSTALLING) or with every chart deployed (READY). A chart
-// whose install failed, or a failed IAM prerequisite, makes its component
-// FAILED. objects names, for each component that is not READY, the Release
-// object its phase is about (the chart that failed, waits or is being installed).
+// installed or rolled out (INSTALLING) or with every chart Ready (READY:
+// rollout says each is deployed and its workloads available). A chart
+// whose install failed or whose rollout timed out, or a failed IAM
+// prerequisite, makes its component FAILED. objects names, for each
+// component that is not READY, the Release object its phase is about (the
+// chart that failed, waits or is being installed). rollout is the
+// readiness of a Release object; nil: deployed is Ready.
 func platformStatus(in component.PlatformInput, plan crossplaneaws.PlatformPlan, skipped []component.NotInstalled,
-	res sequence.Result, views []*cloudv1.ManagedResource) (components []*cloudv1.PlatformComponent, objects map[string]string) {
+	res sequence.Result, views []*cloudv1.ManagedResource, rollout func(object string) readiness) (components []*cloudv1.PlatformComponent, objects map[string]string) {
 	objects = map[string]string{}
 	reasons := map[string]string{}
 	for _, sk := range skipped {
@@ -362,7 +374,7 @@ func platformStatus(in component.PlatformInput, plan crossplaneaws.PlatformPlan,
 			continue
 		}
 		var object string
-		pc.Phase, pc.Message, object = componentPhase(plan.ReleaseObjectNames(c), state, waiting)
+		pc.Phase, pc.Message, object = componentPhase(plan.ReleaseObjectNames(c), state, waiting, rollout)
 		if object != "" {
 			objects[e.Name] = object
 		}
@@ -398,10 +410,12 @@ func componentIAMFailure(c crossplaneaws.PlatformComponentPlan, views []*cloudv1
 const removingMessage = "being removed from the cluster"
 
 // componentPhase reads a component's phase from its Release objects
-// (names, in install order). object is the Release the phase is about: the
-// one that failed or is being installed; "" when all are deployed or none
-// was started.
-func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, waiting map[string][]string) (phase cloudv1.ComponentPhase, message, object string) {
+// (names, in install order) and, for each provider-helm reports Ready, its
+// rollout (nil: Ready as reported). object is the Release the phase is
+// about: the one that failed, is being installed or rolls out; "" when
+// all are Ready or none was started.
+func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, waiting map[string][]string,
+	rollout func(object string) readiness) (phase cloudv1.ComponentPhase, message, object string) {
 	ready, started := 0, false
 	for _, name := range names {
 		v, recorded := state[name]
@@ -423,6 +437,14 @@ func componentPhase(names []string, state map[string]*cloudv1.ManagedResource, w
 			}
 			return phase, "waiting for " + strings.Join(waiting[name], ", "), ""
 		case recorded && v.GetState() == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY:
+			if rollout != nil {
+				switch r := rollout(name); {
+				case r.Failed:
+					return cloudv1.ComponentPhase_COMPONENT_PHASE_FAILED, fmt.Sprintf("chart %s: %s", v.GetExternalName(), r.Message), name
+				case !r.Ready:
+					return cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, "waiting for " + r.Message, name
+				}
+			}
 			ready++
 		case recorded:
 			return cloudv1.ComponentPhase_COMPONENT_PHASE_INSTALLING, v.GetMessage(), name

@@ -49,7 +49,7 @@ func TestPlatformStatusReportsExactComponentIAMFailures(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			views := []*cloudv1.ManagedResource{{Kind: tt.kind, Name: tt.object, State: tt.state, Message: providerError}}
-			components, objects := platformStatus(in, plan, nil, res, views)
+			components, objects := platformStatus(in, plan, nil, res, views, nil)
 			got := components[0]
 			if tt.failed {
 				kind := tt.kind

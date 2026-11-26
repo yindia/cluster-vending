@@ -638,18 +638,56 @@ Every Helm operation on a workload cluster goes through provider-helm, and the
 controller manages it around that
 ([Helm reliability](#helm-operations)). The rules:
 
-- **Rendering.** Releases are rendered with `wait: true`, the definition's
-  install timeout (`install.timeout`, default set per chart) and `maxHistory: 5`.
-  Each carries a digest of the chart, version and values
+- **Rendering.** Releases are rendered with `wait: false`, `waitTimeout` set to
+  the definition's install timeout (`install.timeout`, default 10 m; it bounds
+  Helm's hooks), `rollbackLimit: 3` and `maxHistory: 5`. Helm applies the chart
+  and writes its release record within seconds; it holds no connection or
+  provider worker while the pods start. Each Release carries a digest of the
+  chart, version, values and these settings
   (`cloud.cluster-vending.io/helm-digest`). A release whose digest is already
   live is not written.
-- **One at a time.** At most one release of a cluster installs or upgrades at a
-  time, in `sequence`, then `requires` order. The others say "waiting for Helm
-  release X to settle".
+- **Readiness.** The platform judges a rollout itself (`helmGate.rollout` in
+  `pkg/reconcile/cluster/helm_rollout.go`, the one notion of Ready). A release
+  is Ready when provider-helm acted on its spec, reports it Ready and Helm
+  `deployed`, and its workloads are available in the workload cluster: the
+  Deployments, StatefulSets and DaemonSets in the release's namespace that carry
+  Helm's annotation `meta.helm.sh/release-name: <release>` (and
+  `meta.helm.sh/release-namespace`). Available means the controller observed
+  the latest spec (`observedGeneration >= generation`) and the desired replicas
+  are updated and available; a DaemonSet with 0 desired counts as available. A
+  chart without such workloads (CRDs, policies) is Ready once deployed. A
+  component is `Ready` when every one of its releases is; until then it is
+  `Installing` with what it waits for, e.g. "waiting for
+  deployment/kyverno-admission-controller: 1/3 available". Everything that
+  waits for a component reads this: the install order, the one operation per
+  cluster, a catalog change's fingerprint, the release move, the upgrade steps,
+  the rollout gates, the status and the "installed" event.
+- **Reading workloads.** Through the workload kubeconfig (the controller's
+  `Rollouts` clients), per cluster pass: the client is opened once, each
+  namespace is listed once per kind (pages of 250, at most 4), and all reads of
+  a pass within 30 s. A rollout that finished is recorded on its Release
+  (`cloud.cluster-vending.io/helm-rollout: <digest>/<revision>/ready`), so a
+  settled cluster reads no workloads at all, and later pod churn (a node
+  coming or going) does not make a component un-Ready.
+- **Install timeout.** It runs on the platform's side, from when the platform
+  first saw Helm deploy the release's current digest and revision (the same
+  annotation, `<digest>/<revision>/<since>`). A release that is not Ready within
+  it failed: `Failed`, "rollout timed out after 10m0s waiting for deployment/X",
+  a counted release error that goes into the backoff below, as a failed Helm
+  wait did. There is no automatic rollback: a failed upgrade stays `Failed`
+  with its message until it rolls out (it is then Ready again), a new digest
+  replaces it, or a person retries.
+- **Order and one at a time.** A new release waits until the releases it
+  comes after are Ready: the charts before it of its component (the CRD chart,
+  the main chart before a companion) and those of the components it requires
+  ("waiting for chart kyverno to roll out (...)"). At most one release of a
+  cluster installs, upgrades or rolls out at a time, in `sequence`, then
+  `requires` order; a rollout past its timeout no longer counts. The others say
+  "waiting for Helm release X to settle".
 - **Error classes.** *Transient* (the workload API unreachable, TLS or I/O
   timeouts, throttling, Helm's lock): retried quietly, never counted. *Chart*
   (not found, pull failed): retried and reported, never given up on. *Release*
-  (a hook failed, the rollout timed out, invalid values): counted.
+  (a hook failed, invalid values, the platform's rollout timeout): counted.
 - **Backoff.** A failed attempt pauses its release (`crossplane.io/paused`, the
   marker `cloud.cluster-vending.io/helm-backoff-until`). The pause starts at 1 m,
   doubles with jitter, and is capped at `--helm-backoff-max` (default 30 m). A new
@@ -658,8 +696,10 @@ controller manages it around that
   row, the component is `Failed` with the classified error and a
   `HelmReleaseFailed` event. Its retries stay at the cap until its version or
   values change, or until `cluster retry`.
-- **Stuck releases.** A release left in `pending-install`, `pending-upgrade`,
-  `pending-rollback` or `uninstalling` for its timeout plus 2 minutes (10 minutes
+- **Stuck releases.** An interrupted Helm operation (a dropped connection, a
+  restarted provider) can still leave a release in `pending-install`,
+  `pending-upgrade`, `pending-rollback` or `uninstalling`. One left there for its
+  timeout plus 2 minutes (10 minutes
   for a release an older build wrote) is recovered with the Helm SDK through the
   workload kubeconfig: the newest revision is marked failed and the release is
   rolled back to the last deployed revision, or uninstalled when none was. A
@@ -673,10 +713,17 @@ controller manages it around that
 
 Provider runtime (`crossplaneaws.DefaultProviderRuntime`, not a setting): the
 AWS providers poll every 10 m (`provider-aws-ec2`: 30 m), provider-helm polls
-every 15 s, at most 10 reconciles a second per AWS provider and 50 for
+every 10 m (`DefaultHelmPoll`: only to catch drift; a spec change reaches it at
+once through its watch, and readiness is the platform's, so nothing waits for
+the poll), at most 10 reconciles a second per AWS provider and 50 for
 provider-helm, 1 CPU and 2 GiB requested, 4 CPU and 4 GiB limits, two replicas
 with leader election. The runtime configs are `cluster-vending-aws`,
-`cluster-vending-aws-ec2` and `cluster-vending-helm`.
+`cluster-vending-aws-ec2` and `cluster-vending-helm`. `--install-providers`
+leaves existing ones as they are, with one exception: a `cluster-vending-helm`
+still at the `--poll=15s` of earlier builds is moved to `--poll=10m0s` (only
+that argument; a poll tuned to any other value is kept). A provider-helm on
+another runtime config (for example the `cluster-vending-helm-observation`
+sample) is changed by whoever applied it.
 
 ### Node layout
 
@@ -842,6 +889,40 @@ Each minor names the channel whose clusters run it (one minor per channel). A
 minor that is on no channel stays supported, and its users are warned
 (`status.kubernetes.ending`, `KubernetesEnding`). A minor's `upgradeTo` is the
 next minor, and `endOfSupport` is shown to users.
+
+**Extended-support minors.** A minor on no channel is an extended-support minor
+(EKS extended support). It runs with manual upgrades only:
+
+- A create or update that makes a cluster on such a minor `Automatic` is
+  refused. A create gets `INVALID_ARGUMENT` ("set upgradeMode
+  UPGRADE_MODE_MANUAL, or choose 1.35 or later"). Switching an existing cluster
+  gets `FAILED_PRECONDITION` ("upgrade to 1.35 first (or keep Manual)"). An unset
+  mode is `Manual`.
+- `spec.aws.upgradePolicy.supportType` left unset is rendered as `EXTENDED` on
+  such a minor. This is a render default: the stored spec is not rewritten, and
+  the cluster renders as before once it moves to a channel's minor. An explicit
+  `STANDARD` is refused, because AWS upgrades the control plane by force when
+  standard support ends. Clusters on a channel's minor are unchanged.
+- An import of an EKS cluster on such a minor is read-only and is not checked.
+  Taking it over is checked, because the platform renders the cluster from
+  then on. A discovered `STANDARD` (or `Automatic`) is refused with the same
+  message, which adds that the setting must be changed in EKS before the
+  cluster is imported again.
+- The rule applies to API writes and to edits of the `Cluster` object. A
+  `kubectl edit` that breaks it is not applied, and `EditRefused` says why. The
+  rollout does not take that edit as a request to upgrade automatically. A
+  reconcile pass never checks the rule. When a channel moves past a minor, the
+  automatic clusters on it are upgraded by their rollout as before (writes that
+  leave them as they are, such as an unrelated field, are not refused). Manual
+  clusters on it keep running with the ending warning. A rollout's target is
+  always its channel's minor. A cluster below that minor still goes up one minor
+  at a time, through any minor on no channel in between.
+
+To offer an extended-support minor, list it in `release.yaml` with no `channel`.
+Set `endOfSupport` to the EKS extended-support end date, set `upgradeTo` to the
+next minor, set a `nodeAmiPin` for the minor, and pin `components` for that minor
+where a chart's current version no longer supports it. A release still lists at
+most six consecutive minors.
 
 **Cluster settings.** `spec.releaseChannel` (`Alpha`, `Beta` or `Stable`) selects
 the channel. `spec.upgradeMode` is `Manual` (the default: the tenant chooses the
@@ -1470,7 +1551,7 @@ while a component uses it.
 | `spec.disabled` | bool | Switches it off without deleting it. |
 | `spec.internal` | bool | Only installed as a member of a bundle (`includes`). |
 | `spec.install.helm` | object | `crds` (a chart holding only the CRDs, as templates), `companions` (charts installed after the main one is ready), and the chart source (`repository`, `chart`, `credentials`, `insecureSkipTLSVerify`, `plainHTTP`). |
-| `spec.install.timeout` | duration, 1 m to 60 m | How long Helm waits for each chart's rollout. |
+| `spec.install.timeout` | duration, 1 m to 60 m | How long each chart's workloads may take to become available after Helm deployed it (judged by the platform), and Helm's hook timeout. |
 | `spec.namespace` | string | Namespace in the workload cluster. Required with `install`. |
 | `spec.includes` | list | Makes the definition a bundle of other definitions. |
 | `spec.requires` | list, up to 16 | Components that must be ready first. |

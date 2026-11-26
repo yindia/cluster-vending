@@ -22,7 +22,7 @@ func TestComponentPhaseOfARemovedChart(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			state := map[string]*cloudv1.ManagedResource{"kyverno": {Name: "kyverno", State: tt.state}}
 
-			phase, message, _ := componentPhase([]string{"kyverno"}, state, nil)
+			phase, message, _ := componentPhase([]string{"kyverno"}, state, nil, nil)
 
 			if phase != tt.want {
 				t.Fatalf("phase = %v (%q), want %v", phase, message, tt.want)

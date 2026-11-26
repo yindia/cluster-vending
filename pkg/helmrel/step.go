@@ -54,7 +54,8 @@ type State struct {
 type Observation struct {
 	// Digest is the Release's spec digest (its annotation).
 	Digest string
-	// Ready: provider-helm reports it Ready and Helm says deployed.
+	// Ready: the platform's readiness: Helm deployed it and its workloads
+	// are available (a failed rollout comes as Error, RolloutTimedOut).
 	Ready bool
 	// HelmState is status.atProvider.state.
 	HelmState string

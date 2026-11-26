@@ -1,9 +1,16 @@
-# Optional migration for an existing provider-helm using the empty `default`
-# DeploymentRuntimeConfig. This changes only Helm polling; it does not adopt the
-# platform's separate replica/resource/rate settings or change AWS providers.
-# For an already customized runtime, merge the poll setting into that profile
-# instead, preserving its other package-runtime arguments and identity settings.
-# After creating, explicitly point Provider/provider-helm runtimeConfigRef here.
+# Optional runtime for a provider-helm the platform did not install (one on the
+# empty `default` DeploymentRuntimeConfig). It sets only Helm's poll and
+# reconcile rate; it does not adopt the platform's replica/resource settings or
+# change the AWS providers. For an already customized runtime, merge the poll
+# setting into that profile instead, preserving its other package-runtime
+# arguments and identity settings. After creating, explicitly point
+# Provider/provider-helm runtimeConfigRef here.
+#
+# The poll only catches drift: spec changes reach provider-helm through its
+# watch at once, and the platform judges a rollout itself (Releases render
+# wait: false; docs/architecture.md#helm-operations). Earlier versions of this
+# sample used --poll=15s; move an applied copy to 10m (each poll is a remote
+# Helm status call per Release).
 apiVersion: pkg.crossplane.io/v1beta1
 kind: DeploymentRuntimeConfig
 metadata:
@@ -18,4 +25,4 @@ spec:
         spec:
           containers:
             - name: package-runtime
-              args: ["--poll=15s", "--max-reconcile-rate=50"]
+              args: ["--poll=10m", "--max-reconcile-rate=50"]

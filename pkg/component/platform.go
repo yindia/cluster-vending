@@ -33,8 +33,8 @@ type Install struct {
 	Main       Chart
 	CRDs       *Chart
 	Companions []Companion
-	// Timeout is how long Helm waits for each chart to roll out
-	// (spec.install.timeout); 0: crossplaneaws.DefaultHelmTimeout.
+	// Timeout is how long each chart may take to roll out once Helm
+	// deployed it (spec.install.timeout); 0: crossplaneaws.DefaultHelmTimeout.
 	Timeout time.Duration
 }
 

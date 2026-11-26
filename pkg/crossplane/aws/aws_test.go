@@ -27,7 +27,7 @@ func TestAWSRuntimeConfigs(t *testing.T) {
 		t.Fatalf("configs = %d, %v", len(configs), err)
 	}
 	wantPoll := map[string]string{crossplaneaws.RuntimeConfigName: "--poll=10m0s", crossplaneaws.RuntimeConfigEC2Name: "--poll=30m0s",
-		crossplaneaws.RuntimeConfigHelmName: "--poll=15s"}
+		crossplaneaws.RuntimeConfigHelmName: "--poll=10m0s"}
 	wantRate := map[string]string{crossplaneaws.RuntimeConfigName: "--max-reconcile-rate=10", crossplaneaws.RuntimeConfigEC2Name: "--max-reconcile-rate=10",
 		crossplaneaws.RuntimeConfigHelmName: "--max-reconcile-rate=50"}
 	for _, rc := range configs {
@@ -83,7 +83,7 @@ func TestAWSRuntimeConfigsIndependentHelmPoll(t *testing.T) {
 		want     string
 	}{
 		{"override", 20 * time.Second, "--poll=20s"},
-		{"legacy-zero-fallback", 0, "--poll=15s"},
+		{"zero-is-the-default", 0, "--poll=10m0s"},
 		{"small-positive", time.Nanosecond, "--poll=1ns"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -120,7 +120,7 @@ func TestAWSRuntimeConfigsIndependentHelmPoll(t *testing.T) {
 func TestHelmPollDefaultPreservesExistingInstallation(t *testing.T) {
 	ctx := context.Background()
 	old := crossplaneaws.DefaultProviderRuntime()
-	old.HelmPoll = 10 * time.Minute
+	old.HelmPoll = 20 * time.Second // tuned by someone: never moved
 	configs, err := crossplaneaws.RuntimeConfigs(old)
 	if err != nil {
 		t.Fatal(err)
@@ -146,6 +146,40 @@ func TestHelmPollDefaultPreservesExistingInstallation(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotConfig.Spec, helmConfig.Spec) || !reflect.DeepEqual(gotProvider.Spec, provider.Spec) {
 		t.Fatal("new Helm polling default overwrote existing runtime configuration or Provider reference")
+	}
+}
+
+// An existing provider-helm runtime config still at the 15s poll of earlier
+// builds is moved to DefaultHelmPoll by --install-providers: only that
+// argument changes; the rest of the config stays as it is.
+func TestInstallProvidersMovesTheLegacyHelmPoll(t *testing.T) {
+	ctx := context.Background()
+	legacy := crossplaneaws.DefaultProviderRuntime()
+	legacy.HelmPoll = 15 * time.Second
+	configs, err := crossplaneaws.RuntimeConfigs(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helmConfig := configs[2]
+	ctr := &helmConfig.Spec.DeploymentTemplate.Spec.Template.Spec.Containers[0]
+	ctr.Args = append(ctr.Args, "--debug")
+	k := fakeKube(t, helmConfig)
+
+	res, err := crossplaneaws.InstallProviders(ctx, k, crossplaneaws.DefaultProviderRuntime())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := helmConfig.DeepCopy()
+	if err := k.Get(ctx, client.ObjectKeyFromObject(helmConfig), got); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--poll=" + crossplaneaws.DefaultHelmPoll.String(), "--max-reconcile-rate=50", "--leader-election", "--debug"}
+	if args := got.Spec.DeploymentTemplate.Spec.Template.Spec.Containers[0].Args; !reflect.DeepEqual(args, want) {
+		t.Errorf("args = %v, want %v", args, want)
+	}
+	if !strings.Contains(strings.Join(res.Updated, ","), crossplaneaws.RuntimeConfigHelmName) {
+		t.Errorf("updated = %v, want the Helm runtime config", res.Updated)
 	}
 }
 
@@ -251,11 +285,11 @@ func TestAWSProviderConfigExternalID(t *testing.T) {
 	}
 }
 
-// provider-helm reads only the workload clusters (never AWS), so it polls
-// releases every 15s and is not held to the AWS providers' reconcile rate:
-// a chart that became deployed is reported in seconds, not minutes, also
-// with ~1200 releases (100 clusters of ~12 components).
-func TestHelmProviderPollsFastWithItsOwnReconcileRate(t *testing.T) {
+// provider-helm polls only to catch drift (DefaultHelmPoll, 10m): spec
+// changes reach it through its watch and the platform judges a rollout
+// itself, so nothing waits for the poll. It keeps its own reconcile rate,
+// apart from the AWS providers'.
+func TestHelmProviderPollsOnlyForDriftWithItsOwnReconcileRate(t *testing.T) {
 	configs, err := crossplaneaws.RuntimeConfigs(crossplaneaws.DefaultProviderRuntime())
 	if err != nil {
 		t.Fatal(err)
@@ -263,7 +297,7 @@ func TestHelmProviderPollsFastWithItsOwnReconcileRate(t *testing.T) {
 	want := map[string][]string{
 		crossplaneaws.RuntimeConfigName:     {"--poll=10m0s", "--max-reconcile-rate=10"},
 		crossplaneaws.RuntimeConfigEC2Name:  {"--poll=30m0s", "--max-reconcile-rate=10"},
-		crossplaneaws.RuntimeConfigHelmName: {"--poll=15s", "--max-reconcile-rate=50"},
+		crossplaneaws.RuntimeConfigHelmName: {"--poll=10m0s", "--max-reconcile-rate=50"},
 	}
 	for _, rc := range configs {
 		args := rc.Spec.DeploymentTemplate.Spec.Template.Spec.Containers[0].Args

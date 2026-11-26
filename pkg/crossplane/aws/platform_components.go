@@ -35,7 +35,7 @@ import (
 //	spec.forProvider.chart.{repository,name,version}
 //	spec.forProvider.namespace                            created unless skipCreateNamespace
 //	spec.forProvider.values                               free-form object
-//	spec.forProvider.wait, waitTimeout, maxHistory        wait for the rollout; how long; revisions kept
+//	spec.forProvider.wait, waitTimeout, maxHistory        false (the platform judges the rollout); hooks' timeout; revisions kept
 //	spec.forProvider.skipCRDs
 //	spec.forProvider.insecureSkipTLSVerify, plainHTTP
 //	status.atProvider.state                               "deployed" once Helm installed it
@@ -46,12 +46,18 @@ const (
 	// installed or upgraded it.
 	HelmDeployed = "deployed"
 	// helmRollbackLimit is how often provider-helm retries a failed
-	// install or upgrade (by rolling back) before it gives the release up:
-	// large, a chart that cannot install yet (its nodes are not there) is
-	// retried, not abandoned.
-	helmRollbackLimit = 100
-	// DefaultHelmTimeout is how long Helm waits for a chart to roll out when
-	// the definition sets no install.timeout.
+	// install or upgrade (by rolling back) before it stops on its own.
+	// Small: Helm does not wait (wait: false), so a failure is Helm's
+	// apply itself failing (invalid manifests, a hook, a webhook), which
+	// retrying at once seldom fixes. "Nodes not there yet" is no longer a
+	// Helm failure: the platform's readiness waits for the workloads
+	// (docs/architecture.md#helm-operations), and the platform's backoff
+	// (helmrel.Step) retries what fails, a new digest starting over.
+	helmRollbackLimit = 3
+	// DefaultHelmTimeout is how long a chart's workloads may take to
+	// become available after Helm deployed it when the definition sets no
+	// install.timeout. The platform judges it (helm wait is off); the
+	// Release still carries it as waitTimeout, which bounds Helm's hooks.
 	DefaultHelmTimeout = 10 * time.Minute
 	// helmMaxHistory is how many revisions Helm keeps per release: a failed
 	// attempt is one revision per backoff step, so a few are enough to roll
@@ -83,8 +89,9 @@ type HelmReleasePlan struct {
 	// SkipCRDs leaves the chart's own crds/ directory out (a chart of the
 	// CustomResourceDefinitions is installed before it).
 	SkipCRDs bool
-	// Timeout is how long Helm waits for the chart's workloads to roll out
-	// (the definition's install.timeout); 0: DefaultHelmTimeout.
+	// Timeout is how long the chart's workloads may take to roll out once
+	// Helm deployed it (the definition's install.timeout, judged by the
+	// platform); 0: DefaultHelmTimeout.
 	Timeout time.Duration
 }
 
@@ -100,7 +107,7 @@ func (r HelmReleasePlan) timeout() time.Duration {
 // what decides whether the live Release is written again.
 func (r HelmReleasePlan) Digest() string {
 	return helmrel.Digest(helmrel.Spec{Repository: r.Chart.Repository, Chart: r.Chart.Name, Version: r.Chart.Version,
-		Values: r.Values, SkipCRDs: r.SkipCRDs, Timeout: r.timeout()})
+		Values: r.Values, SkipCRDs: r.SkipCRDs, Timeout: r.timeout(), Wait: false})
 }
 
 // PlatformComponentPlan is one Platform component on one cluster,
@@ -206,10 +213,13 @@ func (p PlatformPlan) helmRelease(component, namespace string, r HelmReleasePlan
 	u.SetLabels(crossplane.ComponentLabels(p.TenantID, p.ClusterID, component))
 	u.SetAnnotations(map[string]string{ExternalNameAnnotation: r.Name, helmrel.DigestAnnotation: r.Digest()})
 	chart := map[string]any{"repository": r.Chart.Repository, "name": r.Chart.Name, "version": r.Chart.Version}
-	// wait: Ready means the workloads rolled out, not that manifests were
-	// written; waitTimeout is how long that may take.
+	// wait: false: Helm applies the chart and records the release within
+	// seconds, holding no connection or provider worker while the pods
+	// start; the platform judges the rollout itself (Helm deployed and the
+	// release's workloads available, within the install timeout). Hooks
+	// are still bounded by waitTimeout.
 	forProvider := map[string]any{"chart": chart, "namespace": namespace,
-		"wait": true, "waitTimeout": r.timeout().String(), "maxHistory": int64(helmMaxHistory)}
+		"wait": false, "waitTimeout": r.timeout().String(), "maxHistory": int64(helmMaxHistory)}
 	if len(r.Values) > 0 {
 		forProvider["values"] = runtime.DeepCopyJSON(r.Values)
 	}
@@ -241,8 +251,9 @@ func (p PlatformPlan) named(name string) *unstructured.Unstructured {
 
 // installed is what waits for the Release name: it is Ready and Helm
 // reports it deployed. provider-helm reports a release Ready as soon as
-// Helm has applied the chart, before its workloads run; whether they do
-// is not checked here (later).
+// Helm has applied the chart (wait: false), before its workloads run;
+// that they do is the Helm gate's to wait for (the ReleaseGate holds a new
+// Release until the ones it comes after rolled out).
 func (p PlatformPlan) installed(name string) []sequence.Condition {
 	r := p.named(name)
 	return []sequence.Condition{sequence.Ready(r), sequence.Field(r, HelmDeployed, "status", "atProvider", "state")}

@@ -71,8 +71,8 @@ func TestHelmReleaseFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"apiVersion":"helm.m.crossplane.io/v1beta1","kind":"Release","metadata":{"annotations":{"cloud.cluster-vending.io/helm-digest":"` + plan.Components[0].Main.Digest() + `","crossplane.io/external-name":"base"},"labels":{"app.kubernetes.io/managed-by":"cluster-vending","cluster-vending.io/cluster":"c-1","cluster-vending.io/component":"base","cluster-vending.io/tenant-id":"acme"},"name":"` +
-		plan.ClusterPrefix + `-base","namespace":"tenant-acme"},"spec":{"forProvider":{"chart":{"name":"base","repository":"https://charts.example.com","version":"1.2.0"},"maxHistory":5,"namespace":"base-system","skipCRDs":true,"values":{"replicas":2},"wait":true,"waitTimeout":"10m0s"},"providerConfigRef":{"kind":"ProviderConfig","name":"` +
-		plan.ClusterPrefix + `-helm"},"rollbackLimit":100}}`
+		plan.ClusterPrefix + `-base","namespace":"tenant-acme"},"spec":{"forProvider":{"chart":{"name":"base","repository":"https://charts.example.com","version":"1.2.0"},"maxHistory":5,"namespace":"base-system","skipCRDs":true,"values":{"replicas":2},"wait":false,"waitTimeout":"10m0s"},"providerConfigRef":{"kind":"ProviderConfig","name":"` +
+		plan.ClusterPrefix + `-helm"},"rollbackLimit":3}}`
 	if string(got) != want {
 		t.Errorf("Release\n got %s\nwant %s", got, want)
 	}
@@ -245,9 +245,10 @@ func TestHelmReleaseRegistryFlags(t *testing.T) {
 	}
 }
 
-// Every Release waits for its rollout (Ready means the workloads run), for
-// the definition's install timeout, and keeps five revisions.
-func TestHelmReleaseWaitsForTheRollout(t *testing.T) {
+// No Release has Helm wait for its rollout (wait: false: the platform
+// judges it); each carries the definition's install timeout (for Helm's
+// hooks) and keeps five revisions.
+func TestHelmReleaseDoesNotWait(t *testing.T) {
 	plan := platformPlan()
 	plan.Components[1].Main.Timeout = 15 * time.Minute
 
@@ -256,11 +257,11 @@ func TestHelmReleaseWaitsForTheRollout(t *testing.T) {
 	want := map[string]string{"base": "10m0s", "mesh": "15m0s", "edge": "10m0s"}
 	for _, r := range releases {
 		name := r.GetAnnotations()["crossplane.io/external-name"]
-		wait, _, _ := unstructured.NestedBool(r.Object, "spec", "forProvider", "wait")
+		wait, found, _ := unstructured.NestedBool(r.Object, "spec", "forProvider", "wait")
 		timeout, _, _ := unstructured.NestedString(r.Object, "spec", "forProvider", "waitTimeout")
 		history, _, _ := unstructured.NestedInt64(r.Object, "spec", "forProvider", "maxHistory")
-		if !wait || history != 5 {
-			t.Errorf("%s: wait %v maxHistory %d, want true and 5", name, wait, history)
+		if !found || wait || history != 5 {
+			t.Errorf("%s: wait %v (set %v) maxHistory %d, want an explicit false and 5", name, wait, found, history)
 		}
 		if w, ok := want[name]; ok && timeout != w {
 			t.Errorf("%s: waitTimeout %q, want %q", name, timeout, w)

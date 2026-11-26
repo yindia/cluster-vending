@@ -3446,4 +3446,4 @@ spec:
       minor: "1.35"
       nodeAmiPin: v20261107
       upgradeTo: "1.36"
-    renderVersion: 10
+    renderVersion: 11

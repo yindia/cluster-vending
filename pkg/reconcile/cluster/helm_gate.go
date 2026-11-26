@@ -21,7 +21,12 @@ import (
 // (docs/architecture.md#helm-operations, mechanisms 2 and 3):
 //
 //   - a Release whose spec digest equals the live one is not written;
-//   - at most one Release of the cluster is installing or upgrading: a
+//   - a new Release waits until the Releases it comes after rolled out:
+//     the charts before it of its component and those of the components
+//     it requires are Ready (rollout: Helm deployed them and their
+//     workloads are available);
+//   - at most one Release of the cluster is installing, upgrading or
+//     rolling out (deployed, its workloads not available yet): a
 //     Release that must change waits while another has an operation in
 //     flight (running, within its timeout), or one was written earlier in
 //     this pass. A Release given up, stuck past its timeout, in its
@@ -42,6 +47,9 @@ type helmGate struct {
 	s                 *Reconciler
 	namespace         string
 	tenantID, cluster string
+	// kubeconfig is the cluster's kubeconfig Secret, to read its
+	// workloads.
+	kubeconfig string
 
 	once sync.Once
 	err  error
@@ -59,6 +67,18 @@ type helmGate struct {
 	// pass).
 	items    map[string]gateItem
 	requires map[string][]string
+	// order are each component's Release objects in install order.
+	order map[string][]string
+
+	// rmu guards the pass's rollout reads (helm_rollout.go): the
+	// readiness found per Release, digest and revision, and the reader of
+	// the cluster's workloads.
+	rmu       sync.Mutex
+	rollouts  map[string]readiness
+	workloads *workloads
+	// written are the Releases this pass lets be written: what the
+	// management cluster shows of them is about the spec before.
+	written map[string]bool
 }
 
 // gateItem is a Release a plan renders: its component, where that comes in
@@ -82,7 +102,7 @@ func (g *helmGate) register(plan crossplaneaws.PlatformPlan, tenant bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.items == nil {
-		g.items, g.requires = map[string]gateItem{}, map[string][]string{}
+		g.items, g.requires, g.order = map[string]gateItem{}, map[string][]string{}, map[string][]string{}
 	}
 	for _, c := range plan.Components {
 		rank := c.Sequence
@@ -90,6 +110,7 @@ func (g *helmGate) register(plan crossplaneaws.PlatformPlan, tenant bool) {
 			rank = tenantRank
 		}
 		g.requires[c.Name] = c.Requires
+		g.order[c.Name] = plan.ReleaseObjectNames(c)
 		for name, digest := range plan.ReleaseDigests(c) {
 			g.items[name] = gateItem{component: c.Name, rank: rank, want: digest, waits: c.WaitsFor != ""}
 		}
@@ -133,7 +154,8 @@ func (s *Reconciler) gateOf(ctx context.Context, row *model.Cluster, namespace s
 }
 
 func (s *Reconciler) newGate(row *model.Cluster, namespace string) *helmGate {
-	return &helmGate{s: s, namespace: namespace, tenantID: row.TenantID, cluster: row.ID, unchanged: map[string]bool{}}
+	return &helmGate{s: s, namespace: namespace, tenantID: row.TenantID, cluster: row.ID, unchanged: map[string]bool{},
+		kubeconfig: storedStatus(row).GetKubeconfigSecret()}
 }
 
 // load reads the cluster's Releases, once.
@@ -159,16 +181,17 @@ func (g *helmGate) load(ctx context.Context) {
 	})
 }
 
-// settled reports whether the Release holds nothing back: deployed and
-// Ready, given up, paused by someone else (it does nothing), or going away.
-func (d *releaseDetail) settled() bool {
+// settled reports whether the live Release name holds nothing back: Ready
+// (rollout: deployed and its workloads available), given up, paused by
+// someone else (it does nothing), or going away.
+func (g *helmGate) settled(ctx context.Context, name string, d *releaseDetail) bool {
 	switch {
 	case d.deleting, d.Paused, d.GaveUp:
 		return true
 	case d.behind:
 		return false
 	}
-	return d.Ready && d.Synced && d.HelmState == crossplaneaws.HelmDeployed
+	return g.rollout(ctx, name, d).Ready
 }
 
 // decide is the platform plan's ReleaseGate.
@@ -192,14 +215,25 @@ func (g *helmGate) decide(ctx context.Context, release *unstructured.Unstructure
 	if first := g.firstToChange(name); first != "" {
 		return sequence.Decision{Hold: g.holdMessage(first)}
 	}
-	if live == nil || live.settled() {
-		if busy := g.busy(name); busy != "" {
+	if live == nil {
+		if hold := g.notRolledOut(ctx, name); hold != "" {
+			return sequence.Decision{Hold: hold}
+		}
+	}
+	if live == nil || g.settled(ctx, name, live) {
+		if busy := g.busy(ctx, name); busy != "" {
 			return sequence.Decision{Hold: g.holdMessage(busy)}
 		}
 	}
 	if g.started == "" {
 		g.started = name
 	}
+	g.rmu.Lock()
+	if g.written == nil {
+		g.written = map[string]bool{}
+	}
+	g.written[name] = true
+	g.rmu.Unlock()
 	return sequence.Decision{}
 }
 
@@ -207,30 +241,69 @@ func (g *helmGate) decide(ctx context.Context, release *unstructured.Unstructure
 // this pass, else the first of the cluster's with an operation in flight;
 // "" when none. A Release that comes after name in the install order never
 // holds it back.
-func (g *helmGate) busy(name string) string {
+func (g *helmGate) busy(ctx context.Context, name string) string {
 	if g.started != "" && g.started != name && !g.comesAfter(g.started, name) {
 		return g.started
 	}
 	for _, n := range g.names {
-		if n != name && g.inFlight(g.live[n]) && !g.comesAfter(n, name) {
+		if n != name && !g.comesAfter(n, name) && g.inFlight(ctx, n, g.live[n]) {
 			return n
 		}
 	}
 	return ""
 }
 
-// inFlight reports whether a Release has an operation running: not settled,
-// and not one of the states that run nothing: going away, paused by anyone
-// (an operator's pause or the platform's backoff), given up, or stuck past
-// the time the operation may take (stuck: its recovery is no operation of
-// the Release). A Release that failed and is retried still counts until
-// its backoff pauses it.
-func (g *helmGate) inFlight(d *releaseDetail) bool {
+// notRolledOut says what a new Release (name, not created yet) waits for:
+// the first Release it is installed after that is not Ready (rollout) —
+// a chart before it of its own component (the CRD chart, the main chart
+// before a companion), else one of a component its component requires.
+// "" when there is none. A required Release that does not exist is not
+// waited for here: the plan's own conditions hold the new one until it
+// is deployed.
+func (g *helmGate) notRolledOut(ctx context.Context, name string) string {
+	me, ok := g.items[name]
+	if !ok {
+		return ""
+	}
+	var before []string
+	for _, n := range g.order[me.component] {
+		if n == name {
+			break
+		}
+		before = append(before, n)
+	}
+	for _, c := range g.requires[me.component] {
+		before = append(before, g.order[c]...)
+	}
+	for _, n := range before {
+		d := g.live[n]
+		if d == nil {
+			continue
+		}
+		if r := g.rollout(ctx, n, d); !r.Ready {
+			chart := d.Chart
+			if chart == "" {
+				chart = n
+			}
+			return fmt.Sprintf("chart %s to roll out (%s)", chart, r.Message)
+		}
+	}
+	return ""
+}
+
+// inFlight reports whether a Release has an operation running: not settled
+// (Helm is installing it, or its workloads are rolling out), and not one
+// of the states that run nothing: going away, paused by anyone (an
+// operator's pause or the platform's backoff), given up, stuck past the
+// time the operation may take (stuck: its recovery is no operation of the
+// Release), or a rollout past its install timeout (it failed). A Release
+// that failed and is retried still counts until its backoff pauses it.
+func (g *helmGate) inFlight(ctx context.Context, name string, d *releaseDetail) bool {
 	switch {
-	case d.settled(), d.PausedByUs, stuck(d, now()):
+	case d.PausedByUs, stuck(d, now()), g.settled(ctx, name, d):
 		return false
 	}
-	return true
+	return !g.rollout(ctx, name, d).TimedOut
 }
 
 // firstToChange is the Release that must change before name's: of the
@@ -340,9 +413,9 @@ func (g *helmGate) readable(ctx context.Context) bool {
 }
 
 // settledAt reports whether every Release of want (object name to the
-// digest it must have) is live at that digest and its Helm operation
-// settled: deployed, Ready and Synced, the provider caught up with its
-// spec, not paused, given up or going away.
+// digest it must have) is live at that digest and Ready (rollout: Helm
+// deployed it, Synced, the provider caught up with its spec, and its
+// workloads are available), not paused, given up or going away.
 func (g *helmGate) settledAt(ctx context.Context, want map[string]string) bool {
 	g.load(ctx)
 	g.mu.Lock()
@@ -353,7 +426,7 @@ func (g *helmGate) settledAt(ctx context.Context, want map[string]string) bool {
 	for name, digest := range want {
 		d := g.live[name]
 		if d == nil || d.Digest != digest || d.deleting || d.behind || d.Paused || d.PausedByUs || d.GaveUp ||
-			!d.Ready || !d.Synced || d.HelmState != crossplaneaws.HelmDeployed {
+			!d.Synced || !g.rollout(ctx, name, d).Ready {
 			return false
 		}
 	}

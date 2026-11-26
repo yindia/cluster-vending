@@ -203,7 +203,7 @@ func (s *Reconciler) installOneTenant(ctx context.Context, row *model.Cluster, c
 		return err
 	}
 	one := component.PlatformInput{Entries: []component.PlatformEntry{*entry}, Pins: in.Pins, Release: in.Release}
-	components, objects := platformStatus(one, plan, nil, res, views)
+	components, objects := platformStatus(one, plan, nil, res, views, s.rolloutOf(ctx, s.gateOf(ctx, row, plan.Namespace)))
 	if len(components) == 1 {
 		pc = components[0]
 	}

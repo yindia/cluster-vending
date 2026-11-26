@@ -272,8 +272,11 @@ type ComponentInstall struct {
 	// +optional
 	Helm *HelmInstall `json:"helm,omitempty"`
 
-	// timeout is how long Helm waits for each of the component's charts to
-	// roll out (provider-helm forProvider.waitTimeout, with wait on), and
+	// timeout is how long each of the component's charts may take to roll
+	// out once Helm deployed it: the platform waits for the chart's
+	// Deployments, StatefulSets and DaemonSets to be available (Helm itself
+	// does not wait) and counts a rollout not done by then as failed. It is
+	// also Helm's hook timeout (provider-helm forProvider.waitTimeout) and
 	// what the platform counts a stuck operation from (timeout plus two
 	// minutes). Heavy charts (operators with hook Jobs, mesh control
 	// planes) need more than the default. From 1m to 60m. Unset: 10m.

@@ -61,8 +61,8 @@ type Definition struct {
 	Includes []string
 	// HasInstall: the definition has an install of its own (spec.install).
 	HasInstall bool
-	// InstallTimeout is spec.install.timeout: how long Helm waits for each
-	// chart to roll out; 0 when unset (the default applies).
+	// InstallTimeout is spec.install.timeout: how long each chart may take
+	// to roll out once Helm deployed it; 0 when unset (the default applies).
 	InstallTimeout time.Duration
 	// Requires are components that must be enabled first.
 	Requires []string

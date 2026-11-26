@@ -30,8 +30,8 @@ func ParseUserValues(file string) (Values, error) {
 	return obj, nil
 }
 
-// The bounds of a definition's install.timeout: Helm waits at least a
-// minute, and at most an hour (the CRD's CEL rule).
+// The bounds of a definition's install.timeout: a rollout may take at
+// least a minute, and at most an hour (the CRD's CEL rule).
 const (
 	MinInstallTimeout = time.Minute
 	MaxInstallTimeout = time.Hour

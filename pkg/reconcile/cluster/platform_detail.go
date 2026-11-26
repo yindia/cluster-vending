@@ -52,7 +52,8 @@ type releaseDetail struct {
 	// .version.
 	Revision     int32
 	ChartVersion string
-	// Timeout is spec.forProvider.waitTimeout; 0 when the Release has none.
+	// Timeout is spec.forProvider.waitTimeout: the install timeout, which
+	// the platform's rollout deadline uses; 0 when the Release has none.
 	Timeout time.Duration
 	// Ready and Synced are the Release's conditions being True.
 	Ready, Synced bool
@@ -65,10 +66,13 @@ type releaseDetail struct {
 	// spec (the Ready condition's observedGeneration is older than the
 	// Release's generation): what Ready says is about the spec before.
 	behind bool
+	// rollout is the platform's helmrel.RolloutAnnotation on the Release.
+	rollout string
 }
 
 // stuckAfter is how long a Helm operation may have been pending before it
-// counts as stuck: the Release's wait timeout plus two minutes, or the
+// counts as stuck: the Release's install timeout (waitTimeout, which bounds
+// Helm's hooks) plus two minutes, or the
 // fixed stuckAfter for a Release without a timeout (one an older build
 // wrote).
 func (d *releaseDetail) stuckAfter() time.Duration {
@@ -94,7 +98,7 @@ func (s *Reconciler) releaseDetail(ctx context.Context, namespace, name string) 
 func detailOf(u *unstructured.Unstructured) *releaseDetail {
 	annotations := u.GetAnnotations()
 	d := &releaseDetail{Chart: annotations[crossplaneaws.ExternalNameAnnotation], Digest: annotations[helmrel.DigestAnnotation],
-		GaveUp: annotations[helmrel.GaveUpAnnotation] == "true"}
+		GaveUp: annotations[helmrel.GaveUpAnnotation] == "true", rollout: annotations[helmrel.RolloutAnnotation]}
 	if until := annotations[helmrel.BackoffAnnotation]; managed.IsPaused(u) && until != "" {
 		d.PausedByUs = true
 		d.BackoffUntil, _ = time.Parse(time.RFC3339, until)

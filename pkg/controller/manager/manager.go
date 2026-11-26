@@ -211,8 +211,10 @@ func Run(ctx context.Context, o Options) error {
 		// Workload clusters, reached with their kubeconfig Secrets (read at
 		// the API server, in tenant namespaces only): to recover a stuck
 		// Helm release of a platform component.
-		Workloads:            management.Workloads(direct),
-		NodeGroupClients:     management.WorkloadClients(direct),
+		Workloads:        management.Workloads(direct),
+		NodeGroupClients: management.WorkloadClients(direct),
+		// The same, to read whether a component's workloads rolled out.
+		Rollouts:             management.WorkloadClients(direct),
 		SubTenantWorkloads:   management.SubTenantWorkloads(direct),
 		RecoverStuckReleases: o.RecoverStuckReleases,
 		HelmBackoffMax:       o.HelmBackoffMax,

@@ -33,6 +33,11 @@ type Spec struct {
 	// Timeout is the install timeout: a longer one must reach the live
 	// Release, so it is part of the digest.
 	Timeout time.Duration
+	// Wait is spec.forProvider.wait: whether Helm itself waits for the
+	// workloads. The platform renders false (it judges the rollout itself,
+	// docs/architecture.md#helm-operations); part of the digest so a
+	// Release an older build wrote with wait: true is written again.
+	Wait bool
 }
 
 // Digest is the hex sha256 of the spec in a canonical form (encoding/json
@@ -50,7 +55,8 @@ func Digest(s Spec) string {
 		Values     map[string]any `json:"values"`
 		SkipCRDs   bool           `json:"skipCRDs"`
 		Timeout    string         `json:"timeout"`
-	}{s.Repository, s.Chart, s.Version, values, s.SkipCRDs, s.Timeout.String()})
+		Wait       bool           `json:"wait"`
+	}{s.Repository, s.Chart, s.Version, values, s.SkipCRDs, s.Timeout.String(), s.Wait})
 	if err != nil {
 		// Values come from JSON or YAML; one that cannot be encoded has no
 		// stable digest: a unique one makes the Release be written.

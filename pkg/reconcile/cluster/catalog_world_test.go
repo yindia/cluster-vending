@@ -10,6 +10,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // catalogPlatform is platformWorld's catalog with a code rollout that
@@ -32,9 +33,9 @@ func (c *catalogPlatform) NetworkCodeAdmitted(context.Context, string, string) (
 
 // catalogClusterWorld is platformWorld on the stable channel with base and
 // mesh (mesh requires base) installed, deployed and fingerprinted.
-func catalogClusterWorld(t *testing.T) (world, *catalogPlatform, *model.Cluster) {
+func catalogClusterWorld(t *testing.T, opts ...func(*reconcile.Deps)) (world, *catalogPlatform, *model.Cluster) {
 	t.Helper()
-	w, src := platformWorld(t)
+	w, src := platformWorld(t, opts...)
 	cp := &catalogPlatform{fakePlatform: src, admitted: true}
 	w.svc.deps.Platform = cp
 	w.helmConfig(t)

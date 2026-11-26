@@ -25,6 +25,7 @@ func TestDigestIsStableAndSensitive(t *testing.T) {
 		"values":     func(s *helmrel.Spec) { s.Values = map[string]any{"a": "different"} },
 		"timeout":    func(s *helmrel.Spec) { s.Timeout = time.Hour },
 		"skipCRDs":   func(s *helmrel.Spec) { s.SkipCRDs = true },
+		"wait":       func(s *helmrel.Spec) { s.Wait = true },
 	} {
 		changed := base
 		mutate(&changed)

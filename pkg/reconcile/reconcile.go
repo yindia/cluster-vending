@@ -118,6 +118,12 @@ type Deps struct {
 	// node groups (EC2NodeClasses and NodePools) and read their status.
 	// Nil: no node group is applied or reported.
 	NodeGroupClients WorkloadClients
+	// Rollouts reaches workload clusters to read the Deployments,
+	// StatefulSets and DaemonSets of a platform or tenant component's
+	// Helm release: a component is Ready once Helm deployed its chart and
+	// those are available (docs/architecture.md#helm-operations). Nil:
+	// a component is Ready once Helm deployed it (tests).
+	Rollouts WorkloadClients
 	// SubTenantWorkloads opens provider-neutral workload clients using the parent
 	// cluster's namespaced kubeconfig reference. Only the controller has this.
 	SubTenantWorkloads SubTenantWorkloads

@@ -64,7 +64,13 @@ const ProviderVersion = "v2.9.0"
 //	10 the system node group has a static size (min = max = desired,
 //	   desired applied in place) and no cluster-autoscaler tags: Karpenter
 //	   is the only scaler
-const RenderVersion = 10
+//	11 a platform component's Helm Release has wait: false and
+//	   rollbackLimit 3: Helm applies and records the chart within seconds,
+//	   and the platform judges the rollout (Helm deployed and the
+//	   release's workloads available, within the install timeout); the
+//	   wait is part of the Release digest (helmrel.Spec.Wait), so every
+//	   Release is written once more
+const RenderVersion = 11
 
 // ProviderPackages are the provider-upjet-aws service providers the
 // platform needs; the family provider comes as their dependency.
@@ -105,8 +111,8 @@ type ProviderRuntime struct {
 	ManagementRoleARN string
 	// Poll is how often an AWS provider checks each resource for drift; EC2Poll
 	// the same for provider-aws-ec2, whose network resources are many and
-	// change rarely. HelmPoll independently checks Helm release readiness;
-	// zero uses the 15s default for callers predating this field.
+	// change rarely. HelmPoll is provider-helm's, apart from the AWS ones;
+	// zero: DefaultHelmPoll.
 	Poll, EC2Poll, HelmPoll time.Duration
 	// MaxReconcileRate caps a provider's reconciles per second (and so its
 	// AWS API calls).
@@ -125,20 +131,35 @@ type ProviderRuntime struct {
 
 // DefaultProviderRuntime is the providers' runtime for ~100 clusters of
 // ~80 managed resources each on one management cluster. Poll 10m (the
-// providers' own default) and 30m for EC2's many, rarely changing network
-// resources. Helm polls every 15s to report release readiness within seconds,
-// without increasing AWS drift polling; at most 10 reconciles a second per AWS
-// provider (the providers default to 100, which AWS API throttling punishes at
-// this size) and 50 for provider-helm, which reads only the workload clusters
-// (~1200 releases in about 25s). Two
-// replicas with leader election: one active, one hot standby.
+// providers' own default), 30m for EC2's many, rarely changing network
+// resources, and DefaultHelmPoll for provider-helm. At most 10 reconciles
+// a second per AWS provider (the providers default to 100, which AWS API
+// throttling punishes at this size) and 50 for provider-helm, which reads
+// only the workload clusters (defaultHelmMaxReconcileRate). Two replicas
+// with leader election: one active, one hot standby.
 func DefaultProviderRuntime() ProviderRuntime {
-	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, HelmPoll: defaultHelmPoll, MaxReconcileRate: 10, HelmMaxReconcileRate: defaultHelmMaxReconcileRate,
+	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: 30 * time.Minute, HelmPoll: DefaultHelmPoll, MaxReconcileRate: 10, HelmMaxReconcileRate: defaultHelmMaxReconcileRate,
 		CPURequest: "1", MemoryRequest: "2Gi", CPULimit: "4", MemoryLimit: "4Gi", Replicas: 2}
 }
 
 const (
-	defaultHelmPoll             = 15 * time.Second
+	// DefaultHelmPoll is how often provider-helm looks at each Release
+	// unasked: only to catch drift in a workload cluster. A spec change
+	// (a new digest, a retry's annotation, a pause lifted) is reconciled
+	// at once through provider-helm's watch, and the platform judges a
+	// rollout itself (wait: false; the controller reads the workloads),
+	// so nothing waits for this poll. Each poll is a remote Helm status
+	// call: at 15s, ~13 Releases on 100 clusters made ~85 a second.
+	DefaultHelmPoll = 10 * time.Minute
+	// legacyHelmPoll is the poll earlier builds gave provider-helm's runtime
+	// config: InstallProviders moves an existing config still at it to
+	// DefaultHelmPoll (install.go).
+	legacyHelmPoll = 15 * time.Second
+	// defaultHelmMaxReconcileRate caps provider-helm's reconciles a second.
+	// Kept at 50: it bounds bursts (a fleet-wide release move rewrites
+	// ~1300 Releases, done in about 25s), and with wait: false a reconcile
+	// takes seconds, not minutes, so the cap no longer ties up workers. The
+	// steady load is set by the poll, not by this cap.
 	defaultHelmMaxReconcileRate = 50
 )
 
@@ -157,7 +178,7 @@ func RuntimeConfigs(rt ProviderRuntime) ([]*pkgv1beta1.DeploymentRuntimeConfig, 
 		return nil, fmt.Errorf("provider Helm poll interval must be positive")
 	}
 	if rt.HelmPoll == 0 {
-		rt.HelmPoll = defaultHelmPoll
+		rt.HelmPoll = DefaultHelmPoll
 	}
 	resources, err := rt.resources()
 	if err != nil {

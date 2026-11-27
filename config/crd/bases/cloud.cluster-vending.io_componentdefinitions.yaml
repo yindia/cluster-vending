@@ -507,12 +507,11 @@ spec:
               role:
                 description: |-
                   role is the part of the platform this definition plays, if any:
-                  NodeProvisioner or NamespaceTenancy (ComponentRole). At most one
+                  NodeProvisioner (ComponentRole). At most one
                   definition per cloud plays a role, and only a Platform one. Unset:
                   an ordinary component, ordered by sequence and requires alone.
                 enum:
                 - NodeProvisioner
-                - NamespaceTenancy
                 type: string
               sequence:
                 default: 100

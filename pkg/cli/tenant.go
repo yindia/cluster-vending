@@ -25,8 +25,8 @@ func TenantCreate(ctx context.Context, c Clients, o Options) (proto.Message, err
 }
 
 // TenantDelete deletes the tenant (TenantService.DeleteTenant): refused,
-// naming them, while it has accounts, networks, clusters, components or
-// sub-tenants. Its namespace is unregistered and kept. --wait waits until
+// naming them, while it has accounts, networks, clusters or components.
+// Its namespace is unregistered and kept. --wait waits until
 // the tenant is no longer listed.
 func TenantDelete(ctx context.Context, c Clients, o Options) (proto.Message, error) {
 	if o.ID != "" {

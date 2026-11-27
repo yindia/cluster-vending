@@ -61,11 +61,6 @@ func newControllerCmd(g *globals) *cobra.Command {
 				return err
 			}
 			warnNodeGroups(g.logger, cfg.NodeGroups)
-			// Which groups sub-tenants may name: the "naas" section of the file.
-			naasCfg, err := config.NaaSFrom(changedFlags(cmd.Flags()), os.LookupEnv)
-			if err != nil {
-				return err
-			}
 			// How the Crossplane providers run: the "providers" section.
 			providers, err := config.ProvidersFrom(changedFlags(cmd.Flags()), os.LookupEnv)
 			if err != nil {
@@ -80,7 +75,6 @@ func newControllerCmd(g *globals) *cobra.Command {
 				AWS: cfg.AWS, AWSAccess: cfg.AWSAccess, Logger: g.logger, InstallProviders: cfg.InstallProviders, InstallCatalog: cfg.InstallCatalog,
 				RecoverStuckReleases: cfg.RecoverStuckReleases, HelmBackoffMax: cfg.HelmBackoffMax, HelmMaxFailures: cfg.HelmMaxFailures, Recommendations: cfg.Recommendations,
 				NodeGroups:  cfg.NodeGroups,
-				NaaS:        naasCfg,
 				Providers:   providers,
 				ScanWorkers: cfg.ScanWorkers, KubeQPS: cfg.KubeQPS, KubeBurst: cfg.KubeBurst,
 				ReconcileWorkers: cfg.ReconcileWorkers, AutomaticUpgrades: cfg.AutomaticUpgrades, UpgradeTimeout: cfg.UpgradeTimeout, TeardownTimeout: cfg.TeardownTimeout,

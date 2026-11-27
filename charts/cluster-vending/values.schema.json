@@ -82,7 +82,7 @@
     },
     "platform": {
       "type": "object",
-      "description": "The shared settings file (/etc/cluster-vending/platform.yaml): flag names plus auth, naas, nodeGroups and providers",
+      "description": "The shared settings file (/etc/cluster-vending/platform.yaml): flag names plus auth, nodeGroups and providers",
       "properties": {
         "auth": {
           "type": "object",
@@ -97,7 +97,8 @@
           }
         },
         "naas": {
-          "type": "object"
+          "description": "Removed with sub-tenants: delete it (both processes refuse a settings file that has it)",
+          "not": {}
         },
         "nodeGroups": {
           "type": "object"

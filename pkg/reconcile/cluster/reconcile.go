@@ -50,9 +50,6 @@ func (s *Reconciler) Reconcile(ctx context.Context, tenantID, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.guardSubTenantSafety(ctx, row); err != nil {
-		return err
-	}
 	if row.Frozen.Holds() {
 		return s.observePaused(ctx, row)
 	}

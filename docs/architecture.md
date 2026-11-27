@@ -31,7 +31,7 @@ The repository builds one binary, `cluster-vending`, with three roles:
 | Role | Command | AWS access | What it does |
 |---|---|---|---|
 | API server | `cluster-vending serve` | Read-only, to a cluster's results bucket, through the tenant role | Serves the Connect API (`cloud.v1`). Validates requests, stores the desired state as custom resources, reads scan results. It runs no reconcile loop and installs nothing. |
-| Controller | `cluster-vending controller` | Yes: the lookups, the account access check, and the Crossplane providers (which run as the management role) | Reconciles the custom resources: tenants, sub-tenants, accounts, networks, clusters, releases and rollouts, scanners. Installs the CRDs, the providers and the component catalog on start. |
+| Controller | `cluster-vending controller` | Yes: the lookups, the account access check, and the Crossplane providers (which run as the management role) | Reconciles the custom resources: tenants, accounts, networks, clusters, releases and rollouts, scanners. Installs the CRDs, the providers and the component catalog on start. |
 | CLI | `cluster-vending <group> <verb>` | None | Calls the API server (`--server`) and prints tables, JSON or YAML. |
 
 The tenant console (`ui/`) is a Next.js application. It calls the same Connect
@@ -103,8 +103,7 @@ platform's own credentials alone ([AWS access and accounts](#aws-access-and-acco
 
 - Platform components, installed with every cluster and never enabled by a
   tenant: Karpenter, AWS Load Balancer Controller,
-  External Secrets, Kyverno, the Istio ambient bundle, and Capsule when the
-  cluster sets `naas`.
+  External Secrets, Kyverno and the Istio ambient bundle.
 - Tenant components, enabled per cluster with validated values: `gpu-operator`
   and `kyverno-policies`.
 - The catalog (`ComponentDefinition` objects) is synced from the build by the
@@ -134,15 +133,6 @@ platform's own credentials alone ([AWS access and accounts](#aws-access-and-acco
   discovery and deletion, and is confirmed by the controller (`--wait`).
 - Exceptions let one cluster through a platform freeze. `--until` ends a
   freeze by itself.
-
-**Sub-tenants and NaaS**
-
-- `SubTenant` is a namespace allocation inside a cluster that runs Capsule
-  (`naas: true`): namespace keys, quotas, a policy profile, and access
-  bindings to identity groups.
-- A sub-tenant's access opens only when its groups are in the platform's
-  `naas.allowedGroups`, its EKS OIDC association is active and its Tenant and
-  namespaces are observed as rendered ([SubTenants and NaaS](#subtenants-and-naas)).
 
 **Scans and visibility**
 
@@ -225,14 +215,14 @@ Each layer has one job. The import rules were checked with `go list -deps`.
 | `pkg/database/repository`, `pkg/database/cloudstore`, `pkg/database/model` | The storage interface, its one implementation on the custom resources, and the row types. | `repository` and `model` import nothing else from the repository. |
 | `pkg/controller/*`, `pkg/convert`, `pkg/owner`, `api/v1alpha1` | The custom resource types, the controllers, the manager, owner references, and the conversion between the typed spec and the contract. | Types import nothing from `pkg/`. |
 | `pkg/results`, `pkg/reconcile/resultsink` | Writes and reads a cluster's results objects in S3, with bounds and ETags. | The S3 client only. |
-| `pkg/naas`, `pkg/catalog`, `pkg/release` | Sub-tenant and Capsule logic, the shipped catalog and release, and their checks. | Kubernetes types and `pkg/`-level checks. |
+| `pkg/catalog`, `pkg/release` | The shipped catalog and release, and their checks. | Kubernetes types and `pkg/`-level checks. |
 | `pkg/buildserial` | The build's serial, stamped on the CRDs, the shipped definitions and the shipped release, so an older build never writes over a newer one ([Runbook: upgrade and roll back the platform](#runbook-upgrade-and-roll-back-the-platform)). | The standard library only. |
 | `pkg/cli`, `pkg/cli/login`, `cmd/` | The CLI commands and the command tree. `cmd/` is thin. | `pkg/cli` imports only the generated client. |
 
 ### Storage
 
 - There is no database. The custom resources are the store: `Tenant`,
-  `CloudAccount`, `Network`, `Cluster`, `SubTenant`, `Component`,
+  `CloudAccount`, `Network`, `Cluster`, `Component`,
   `ComponentDefinition`, `Release`, `ReleaseChannel`, `ReleaseHold`
   ([CR definitions](#4-cr-definitions)). `pkg/database/cloudstore` implements
   the repository interface on a direct (uncached for ownership decisions)
@@ -591,7 +581,7 @@ The install order of a new cluster:
    component; everything after it waits for it).
 3. The other platform components by sequence (default 100), in `requires`
    order, on the platform pool: AWS Load Balancer Controller, External
-   Secrets, Kyverno, the Istio bundle, and Capsule when `naas` is set.
+   Secrets, Kyverno and the Istio bundle.
 4. The tenant components, when the tenant enables them.
 
 Each platform component's version and locked values come from the release the
@@ -602,23 +592,22 @@ recoveries, next retry) and the condition `PlatformComponentsReady`. That
 condition does not hold back the cluster's own `Ready`. Platform components are
 removed in reverse order when the cluster is deleted.
 
-**Roles.** Two definitions play a part of the platform no other does. They
-declare it in `spec.role`, and the platform finds them by it, never by name
-(`pkg/component/roles.go` is the one place that knows the roles and what each
-implies). At most one definition per cloud plays a role, and only a Platform
+**Roles.** One definition plays a part of the platform no other does. It
+declares it in `spec.role`, and the platform finds it by it, never by name
+(`pkg/component/roles.go` is the one place that knows the role and what it
+implies). At most one definition per cloud plays the role, and only a Platform
 one (`controller --check`, the `Valid` condition):
 
 | Role | Shipped as | What the role implies |
 |---|---|---|
 | `NodeProvisioner` | `karpenter` | Installs first (sequence 0, whatever `spec.sequence` says; 0 is no other definition's). The only definition on the system group (`${system.*}`), never on the platform pool. Cannot be disabled (CEL). The platform pool is applied once it is `Ready`, and its controller policy is the one the pool's node class needs. Removed last on deletion, after the node groups. |
-| `NamespaceTenancy` | `capsule` | Installed only on clusters with `spec.naas`, with what requires it. Sub-tenants wait for it. A new release pin of it carries the build's NaaS bootstrap values. |
 
 A definition without a role is an ordinary component: `sequence` and
 `requires` order it and `sizing` sizes it, so adding or removing one is a
 definition file and a release pin, with no Go change. A shipped definition the
 platform team edited before `spec.role` existed is not updated by a build;
-until it declares the role, the shipped name (`karpenter`, `capsule`, or the
-Capsule chart) stands for it, on a cloud where no definition declares the role.
+until it declares the role, the shipped name (`karpenter`) stands for it, on a
+cloud where no definition declares the role.
 
 The shipped platform set (`pkg/catalog/definitions`):
 
@@ -629,7 +618,6 @@ The shipped platform set (`pkg/catalog/definitions`):
 | `external-secrets` | 2.15.0 | `external-secrets` | |
 | `kyverno` | 3.10.0 | `kyverno` | Enabled by default. The policies are `kyverno-policies`, a tenant component. |
 | `istio` (bundle) | 1.32.0 | `istio-system`, `istio-ingress` | Members are internal: `istio-base`, `istiod`, `istio-cni`, `ztunnel`, `istio-ingress-gateway`, in that `requires` order. Ambient mode, no sidecars. |
-| `capsule` | 0.15.2 (OCI) | `capsule-system` | `role: NamespaceTenancy`: only when `spec.naas: true`. Needs cert-manager on the cluster. |
 
 Tenant components: `gpu-operator` (v26.7.2, `gpu-operator`), and
 `kyverno-policies` (3.10.0, requires `kyverno`). Only these two have a values
@@ -654,6 +642,20 @@ shipped in `cloud.cluster-vending.io/shipped-hash`:
 component is removed from existing clusters by the gated catalog change (see
 Code changes), and a tenant component can no longer be enabled. Definitions that
 require it are off with it, in the same change.
+
+**Capsule removal.** Capsule left the catalog with sub-tenants, the same way
+cluster-autoscaler did ([Node layout](#node-layout)). `catalog.Sync` deletes the
+shipped, unedited `capsule` definition; the `definition-in-use` finalizer holds
+it while clusters still have it. The controller then clears the
+`NamespaceTenancy` role from any definition still declaring it (the CRD refuses
+that role on update), and disables one that is not being deleted (a copy the
+platform team edited), so it is not installed on every cluster as an ordinary
+component. Each cluster removes Capsule as a gated catalog change (code rollout,
+tiers, freeze): a Helm uninstall, whose chart post-delete hook Job removes
+Capsule's dynamic webhook configurations, then its IAM. The removals run before
+the `kyverno` value change (`capsule-system` no longer excluded) in the same
+catalog change. Capsule's CRDs and any tenant namespaces stay on the workload
+cluster.
 
 **Providers.** Each definition is for one cloud, in `spec.provider` (`aws`,
 `gcp` or `azure`, default `aws`). Only `aws` definitions ship. A variant for
@@ -816,7 +818,7 @@ manage:
 | Pool | Label | Taint | Runs |
 |---|---|---|---|
 | The system node group (`system`), EKS managed | `node.cluster-vending.io/pool=system` | `node.cluster-vending.io/pool=system:NoSchedule` | Phase 1: the EKS add-on controllers (CoreDNS and the others below) and Karpenter (`${system.*}`), nothing else |
-| The platform pool (`platform-pool`, Karpenter) | `node.cluster-vending.io/pool=platform-pool` | `node.cluster-vending.io/pool=platform-pool:NoSchedule` | Phase 2: every other platform component (AWS Load Balancer Controller, External Secrets, Capsule, Kyverno, istiod, the ingress gateway) and the tenant's components (the GPU operator's controllers), through `${platform.*}` |
+| The platform pool (`platform-pool`, Karpenter) | `node.cluster-vending.io/pool=platform-pool` | `node.cluster-vending.io/pool=platform-pool:NoSchedule` | Phase 2: every other platform component (AWS Load Balancer Controller, External Secrets, Kyverno, istiod, the ingress gateway) and the tenant's components (the GPU operator's controllers), through `${platform.*}` |
 
 DaemonSets (VPC CNI, kube-proxy, the pod identity agent, istio-cni, ztunnel)
 tolerate every taint and run everywhere.
@@ -846,14 +848,12 @@ Every cluster's VPC CNI enforces NetworkPolicy: `addons.yaml` gives `vpc-cni`
 a `configuration` of `enableNetworkPolicy: "true"` and `nodeAgent.enabled: true`
 (confirmed with `describe-addon-configuration` from v1.16.0-eksbuild.1 to
 v1.23.3-eksbuild.2), on created and imported clusters alike (RenderVersion 12;
-an import's plan shows it as a `configurationValues` change). Without it the
-deny-by-default policies of sub-tenant isolation (`pkg/naas/assets/bootstrap.yaml`)
-are written but not enforced. Keys under `configuration` are written over the
-tenant's `configurationValues` for that add-on (objects merge key by key): the
-platform's win because they carry an isolation guarantee, and every other key
-the tenant set, nested ones included, stays. A configuration that is not a JSON
-or YAML object goes to EKS as it is, which refuses it on the add-on. A
-sub-tenant's access waits for enforcement (`NetworkPolicyReady`, below).
+an import's plan shows it as a `configurationValues` change). Without it a
+tenant's NetworkPolicies are accepted but not enforced. Keys under
+`configuration` are written over the tenant's `configurationValues` for that
+add-on (objects merge key by key): the platform's win, and every other key the
+tenant set, nested ones included, stays. A configuration that is not a JSON or
+YAML object goes to EKS as it is, which refuses it on the add-on.
 
 **Install order.** A cluster's components install in two phases, on the pool
 they run on (`component.InstallPhase`):
@@ -1409,7 +1409,7 @@ does not use this protocol is not seen by it.
 - IAM policies are checked against IAM's 6,144-character limit at render time, so a
   policy that would be too large is refused before it is attached (the rendering
   bound).
-- Platform names of clusters, tenants and sub-tenants are DNS labels, checked at the API.
+- Platform names of clusters and tenants are DNS labels, checked at the API.
 
 ### Authentication
 
@@ -1499,64 +1499,18 @@ is [Authentication](#authentication).
   prefixes cannot contain `system:`. An imported cluster keeps the provider it came
   with, and `spec.access.oidc` is refused next to it.
 
-### SubTenants and NaaS
+### Sub-tenant removal
 
-**Capsule.** A cluster with `spec.naas: true` gets the platform component `capsule`
-(0.15.2) in `capsule-system`, installed with the cluster's own cert-manager. Capsule
-is the namespace tenancy within a workload cluster. Its install follows the same
-rules as any platform component (release, tier, freeze, upgrade). Disabling NaaS on
-a cluster with sub-tenants is blocked (`SubTenantSafety`), listing the dependents.
-
-**SubTenant** (`SubTenantService`, a namespaced `SubTenant` in the tenant namespace).
-One allocation of namespaces on a cluster, with its own Capsule `Tenant` in the
-workload cluster. Its spec is described in [SubTenant](#subtenant). The controller
-(`pkg/controller/subtenant_controller.go`) provisions only its owned Capsule
-`Tenant`, and the shared Capsule resources generate the namespaces and policies.
-
-- **Provisioning** (`ProvisioningReady`): the current Tenant and every requested
-  namespace baseline are acknowledged by Capsule.
-- **Access** (`AccessReady`) opens when all of these hold, and closes when one stops
-  holding. Provisioning does not grant human access.
-  - `GroupsAllowed`: every group in `adminGroups` and `viewerGroups` is in the
-    config file's `naas.allowedGroups` and not in `naas.deniedGroups` (exact values
-    or a prefix ending in `*`; deny is checked first; empty, the default, allows
-    none). The API refuses other groups with `INVALID_ARGUMENT`, listing the allowed
-    patterns. The controller checks again before it renders access, so a group
-    removed from the list closes access with reason `GroupNotAllowed` and no
-    RoleBinding is rendered. This bounds the group names, not the caller.
-  - `OIDCReady`: an ACTIVE EKS OIDC association matches the cluster's OIDC.
-  - `NetworkPolicyReady`: the cluster's `vpc-cni` add-on is Ready and Synced and
-    EKS reports its configuration enforcing NetworkPolicy
-    ([network policy enforcement](#network-policy-enforcement)); the
-    deny-by-default policies of the isolation baseline hold nothing before. Until
-    then `AccessReady` is False with `NetworkPolicyPending`. Access that is already
-    open stays open (the gate is not pulled and the sub-tenant does not go
-    `Degraded`) while the add-on updates, or before an older render gains
-    enforcement: otherwise one add-on update would cut every sub-tenant's access.
-  - The per-allocation checks: the Tenant equals its render (spec hash), every
-    namespace exists with its UID, and each baseline is observed (`BaselineReady`).
-  - Propagated namespace readiness and the exact generated RoleBindings. Only the
-    objects the platform creates are tracked: a RoleBinding or other object someone else
-    adds to a sub-tenant namespace is left alone. A platform access binding
-    (`naas-access-*`) that is no longer wanted closes access (`AccessBindingMismatch`).
-
-  `Ready` is `ProvisioningReady`, and `AccessReady` when groups are named. A
-  sub-tenant whose open access closes goes to the `Degraded` state with the reason.
-- **No isolation test.** Access does not wait on a runtime test of the cluster's
-  isolation (traffic, admission, RBAC). The checks above read objects; they trust that
-  the platform-installed CNI, Capsule, Istio and Pod Security settings enforce them. The
-  earlier qualifier Job and its record were removed; the retired conditions
-  `AccessQualified` and `ClusterQualified` are dropped from the status.
-- **Access bindings** map an identity group to a role profile (`workload-editor` is
-  the only one). `adminGroups` and `viewerGroups` are exact group-claim values, never
-  wildcards.
-- **Offboarding** is guarded. `deletionProtection` must be set to false first, and
-  the controller reports `deletionBlockers`. An owned, empty namespace may be deleted.
-
-The sub-tenant access rules are in `pkg/naas`: an access binding is trusted template
-input, and nothing in a tenant request or in a sub-tenant's own status can open access.
-`SubTenantService` is served over Connect. The console and the CLI's `subtenant` commands
-use it, with the same manifest (`examples/subtenant.yaml`).
+Sub-tenants (PROP-05, withdrawn) and Capsule were removed: the `SubTenant` kind,
+`SubTenantService`, the `subtenant` commands, the cluster setting `spec.naas`, the
+role `NamespaceTenancy` and the config file's `naas` section. On start, once it
+leads, the controller (`pkg/controller/subtenant_removal.go`) releases every
+`SubTenant` an older build left: it removes the `cloud.cluster-vending.io/subtenant`
+finalizer without the old workload-cluster cleanup, so tenants keep the namespaces
+and RBAC they have in their clusters. It then deletes the CRD
+`subtenants.cloud.cluster-vending.io` and logs what it released. A restart repeats
+it with nothing to do. Capsule leaves each cluster as a catalog change
+([Capsule removal](#platform-components)).
 
 ## 4. CR definitions
 
@@ -1567,7 +1521,6 @@ a status subresource. The CRD manifests are generated into `config/crd/bases` by
 | Kind | Short name | Scope | Written by | Represents |
 |---|---|---|---|---|
 | `Tenant` | `cvtenant` | Cluster | API (`CreateTenant`); the tenant controller for its namespace | A tenant and its namespace `tenant-<id>` |
-| `SubTenant` | `cvst` | Namespaced | API (`SubTenantService`); the sub-tenant controller | A namespace allocation on a cluster that runs Capsule |
 | `CloudAccount` | `cvacct`, `cvaccount` | Namespaced | API (`BootstrapTenant`); the account controller | A tenant's AWS account, its `ProviderConfig` and access verdict |
 | `Network` | `cvnet`, `cvnetwork` | Namespaced | API (Create, Import, Takeover, Update, Delete); the network controller | A VPC and its subnets, NAT and flow logs, or an imported VPC |
 | `Cluster` | `cvc`, `cvcluster` | Namespaced | API (Create, Import, Takeover, Update, Delete); the cluster, rollout and scanner controllers | An EKS cluster, with its node groups, components and status |
@@ -1585,7 +1538,7 @@ Shared object conventions:
   owners), `cloud.cluster-vending.io/shipped` and `/shipped-hash` (catalog and
   release objects shipped by a build).
 - **Finalizers**: `cloud.cluster-vending.io/cloudaccount`, `/network`, `/cluster`,
-  `/tenant`, `/subtenant`, `/component`, `/definition-in-use` (catalog; held while
+  `/tenant`, `/component`, `/definition-in-use` (catalog; held while
   a component uses it), `/release-in-use` (a release a channel or hold names).
 - **Conditions**: `Ready` and `Synced` on the owned kinds, each with finer ones listed
   under the kinds below. Reasons are CamelCase, the messages are sentences.
@@ -1601,28 +1554,6 @@ label `cloud.cluster-vending.io/tenant=<id>`. Deleting the Tenant keeps the name
 | `status.namespace` | string | The tenant's namespace. |
 | `status.conditions` | list | `Ready`. |
 | `status.freeze` | object | The effective freeze: `frozen`, `scope`, `reason`, `until`, `revision`. |
-
-### SubTenant
-
-Namespaced in the tenant's namespace. Its finalizer is `cloud.cluster-vending.io/subtenant`.
-Its name is an immutable DNS label (`spec.name`), and the references carry UIDs so that
-a replacement with the same name is not adopted.
-
-| Field | Type | Meaning |
-|---|---|---|
-| `spec.tenantRef` | `{name, uid}` | The owning Tenant. |
-| `spec.clusterRef` | `{id, name, uid}` | The cluster the namespaces are on. The ID is a UUID. |
-| `spec.name` | DNS label | The immutable allocation name. New allocations must set it. |
-| `spec.deletionProtection` | bool | Must be `false` before deletion. Nil is protected. |
-| `spec.namespaceKeys` | list, at least 1 | The namespaces of the allocation. Append-only; the platform assigns the remote names. |
-| `spec.quota` | `{namespaceCount, hard}` | Namespace count (at least 1) and the approved quota dimensions. |
-| `spec.policyProfile` | enum | `restricted-ambient-v1`. |
-| `spec.access` | object | `bindings` (up to 32: `identityRef` and `roleProfile`, the latter `workload-editor`), `adminGroups` and `viewerGroups` (exact group-claim values, up to 32 each). |
-| `status.state` | enum | `Pending`, `Provisioning`, `Ready`, `Degraded`, `Failed`, `Deleting`. |
-| `status.conditions` | list | `ProvisioningReady`, `AccessReady`, `Ready`. |
-| `status.namespaces` | list | Per namespace: its key, name, UID, template revision, conditions. |
-| `status.deletionBlockers` | list, up to 64 | What blocks the deletion. |
-| `status.remoteCapsuleTenant` | string | The Capsule Tenant in the workload cluster, with its UID. |
 
 ### CloudAccount
 
@@ -1685,7 +1616,7 @@ are marked so in the type; the rest can be updated.
 | `spec.releaseChannel` | `Alpha`, `Beta`, `Stable` | The channel the cluster takes platform releases from. |
 | `spec.upgradeMode` | `Manual` (default), `Automatic` | Whether platform releases and Kubernetes upgrades may move the cluster. |
 | `spec.maintenanceWindow` | `{days, start, duration}` | When an automatic upgrade may start: days (empty: every day), start in UTC (`HH:MM`), duration 1 h to 24 h. |
-| `spec.naas` | bool | Installs Capsule (namespace tenancy). Default false. |
+| (`naas`) | none | Removed with sub-tenants; field 15 of `ClusterSpec` is reserved. A binary request that still carries it, or an `UpdateCluster` mask naming `spec.naas`, is refused with `INVALID_ARGUMENT` ("spec.naas was removed with sub-tenants: the platform no longer installs Capsule"). JSON drops it. A stored value is ignored on read. A CLI manifest with `naas` is refused, saying it was removed. |
 | (node groups) | none | The platform's, not the spec's: the system group and the platform pool ([Node layout](#node-layout)). The old `spec.nodeGroups` and `spec.defaultNodePool` are gone; a stored object that still has them is read without them. |
 | `spec.aws` | object | `accessConfig.authenticationMode`, `enabledClusterLogTypes`, `upgradePolicy.supportType`, `addons[]` (name, version, configuration, S3 buckets), `controlPlaneLogGroup`, `irsa`, `additionalSecurityGroupIDs` (immutable). |
 | `spec.importFrom.aws` | `{defaultNodeGroupName}` | Imports an existing EKS cluster. The named node group is adopted read-only, as it is; its other node groups are not imported. |
@@ -1735,7 +1666,7 @@ while a component uses it.
 | `spec.namespace` | string | Namespace in the workload cluster. Required with `install`. |
 | `spec.includes` | list | Makes the definition a bundle of other definitions. |
 | `spec.requires` | list, up to 16 | Components that must be ready first. |
-| `spec.role` | `NodeProvisioner`, `NamespaceTenancy` | The part of the platform it plays ([Roles](#platform-components)). Platform only, one per cloud. Unset: an ordinary component. |
+| `spec.role` | `NodeProvisioner` | The part of the platform it plays ([Roles](#platform-components)). Platform only, one per cloud. Unset: an ordinary component. |
 | `spec.sequence` | int32, 0 to 10000, default 100 | Platform components install in ascending sequence. The `NodeProvisioner` is 0 by its role (CEL: it is not disabled), and 0 is no other definition's; every other shipped definition uses the default. |
 | `spec.sizing` | object | What a Platform component runs, for the sizing rule: `deployments` (`name`, `replicas` and `requests`: `platformValues` paths) and `daemonSets` (`name`, `requests`). Unset: no workload. |
 | `spec.versionGroup` | string | Components that are versions of one product, upgraded together (`istio`, `kyverno`). |
@@ -1901,7 +1832,6 @@ with JSON or binary bodies. Its services:
 | `TenantService` | `ListTenants`, `CreateTenant`, `DeleteTenant`, `Freeze`, `Unfreeze`, `GetFreeze`, `ListReleases`, `GetRelease`, `ListReleaseChannels`, `GetReleaseChannel`, `BootstrapTenant`, `GetCloudAccount`, `ListCloudAccounts`, `VerifyCloudAccount`, `DeleteCloudAccount`, `GetAccountOnboarding`, `WhoAmI` |
 | `NetworkService` | `CreateNetwork`, `ImportNetwork`, `TakeOverNetwork`, `GetNetwork`, `ListNetworks`, `UpdateNetwork`, `DeleteNetwork`, `ListNetworkEvents` |
 | `ClusterService` | `CreateCluster`, `ImportCluster`, `TakeOverCluster`, `GetCluster`, `ListClusters`, `UpdateCluster`, `DeleteCluster`, `RetryCluster`, `ListClusterEvents`, `ListClusterDeprecations`, `ListClusterRecommendations`, `ListClusterViolations`, `ListClusterViolationEvents`, `ListClusterNodeGroupManifests`, `ListNodeGroupNodes`, `GetNodeResources` |
-| `SubTenantService` | `CreateSubTenant`, `GetSubTenant`, `ListSubTenants`, `UpdateSubTenant`, `DeleteSubTenant` |
 | `ComponentService` | `ListComponentDefinitions`, `GetComponentValues`, `EnableComponent`, `UpdateComponent`, `DisableComponent`, `GetComponent`, `ListComponents` |
 | `AdminService` | `Freeze`, `Unfreeze`, `GetFreeze`, `ListReleases`, `GetRelease`, `ListReleaseChannels`, `GetReleaseChannel` |
 
@@ -1934,7 +1864,9 @@ variable, then the file, then the default. The config file is YAML with the
 settings keyed by flag name, plus two structured sections: `auth` (server only,
 [Authentication](#authentication)) and `nodeGroups`
 ([Node groups configuration](#node-groups-configuration)). Unknown keys are errors, and
-every problem is reported at startup, together.
+every problem is reported at startup, together. A file that still has the top-level
+`naas` section is refused at start by both processes ("the naas section was removed
+with sub-tenants ... delete it"); the chart's values schema refuses `platform.naas`.
 
 ### Global settings
 
@@ -2215,23 +2147,22 @@ tag of both.
 ### CLI
 
 The command tree is `cluster-vending [--server ...] <group> <verb>`. The groups
-`tenant`, `account`, `network`, `cluster`, `subtenant`, `component`, `admin` and the
+`tenant`, `account`, `network`, `cluster`, `component`, `admin` and the
 commands `login`, `logout`, `whoami`, `serve`, `controller`, `live` (the live reader,
 started for the API server; not for people) are the complete set.
 `--help` on each lists the flags. `-o table|wide|yaml|json` applies to every read.
 
 | Group | Verbs | Notes |
 |---|---|---|
-| `tenant` | `create <id>`, `list`, `delete <id> [--wait]`, `freeze [--reason --until --wait]`, `freeze status`, `unfreeze [--wait]` | `list` needs no `--tenant`. `delete` is refused, naming them, while the tenant has accounts, networks, clusters, components or sub-tenants; its namespace is unregistered and kept. Freezes are the tenant's own scope. |
+| `tenant` | `create <id>`, `list`, `delete <id> [--wait]`, `freeze [--reason --until --wait]`, `freeze status`, `unfreeze [--wait]` | `list` needs no `--tenant`. `delete` is refused, naming them, while the tenant has accounts, networks, clusters or components; its namespace is unregistered and kept. Freezes are the tenant's own scope. |
 | `account` | `create -f`, `get --id`, `list`, `verify --id [--region ... --wait]`, `delete --id [--wait]` | `create` prints the role template's steps (or the trust, for a custom role). |
 | `network` | `create -f [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--wait]`, `import -f`, `takeover <id> [--wait]`, `events <id> [--only-warnings]` | `--plan` shows the changes without applying them. `--live` reads the status from the management cluster. |
 | `cluster` | `create -f [--no-self-admin] [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--force] [--wait]`, `import -f`, `takeover <id> [--skip-platform-components] [--wait]`, `kubeconfig <id> [--print \| --oidc]`, `deprecations <id> [--only-removed --sort --order]`, `recommendations <id> [--namespace --only-changes --sort --order]`, `nodes <id> [--group --ready \| --not-ready --name --sort --order]`, `nodes <id> --manifests [--group]`, `versions [--channel]`, `violations <id> [--namespace --engine --sort --order]`, `violations <id> --events`, `events <id> [--only-warnings]`, `retry <id> [--component ... --upgrade]` | `--force` tears down without the API. `retry` answers per item. `get` shows the control plane's CloudWatch log group and its console link when control plane logging is on. `nodes` reads every group the cluster reports unless `--group`, and ends with each group's CPU and memory allocatable vs requested, read live (GetNodeResources); `--manifests` prints the platform pool's NodePool and EC2NodeClass YAML. `violations --events` is the policy and admission events of the last hour. `versions` lists the Kubernetes minors the channels' releases offer (default, upgrade target, end of support; a minor on no channel is extended support, Manual clusters only). `--sort` takes the list's keys in lower case (`cpu-requested-percent`, `cpu-change`); `--order` is `asc` or `desc`. |
-| `subtenant` | `create -f [--cluster] [--wait]`, `get <id> --cluster`, `list [--cluster]`, `update <id> -f [--wait]`, `delete <id> --cluster [--etag] [--wait]` | The console's SubTenant manifest: the cluster is `metadata.clusterId` or `--cluster`, the name is `spec.name`. `delete` reads the etag when `--etag` is not given and refuses while deletion protection is on. |
 | `component` | `catalog [--cluster]`, `template <name>`, `enable <name> --cluster [-f] [--validate-only] [--wait]`, `update <id> -f [--validate-only] [--etag]`, `disable <id> [--etag]`, `get <id> [--values]`, `list [--cluster] [--details]` | `template` prints the values file to start from. The version is not a flag. `catalog` and `get` show the IAM role the platform creates in the tenant account for a component (access, service accounts, policy). |
 | `admin` | `freeze [--platform \| --tenant \| --network \| --cluster] --reason [--until --wait --reset-exceptions]`, `freeze status`, `unfreeze [scope] [--wait]`, `release list`, `release get --id`, `channel list`, `channel get --id` | Operator commands; they take no `--tenant`. Releases and channels are read-only. |
 
 Manifests are the API's messages (`apiVersion: cluster-vending.io/v1`, kinds
-`CloudAccount`, `Network`, `NetworkImport`, `Cluster`, `ClusterImport`, `SubTenant`). `update -f`
+`CloudAccount`, `Network`, `NetworkImport`, `Cluster`, `ClusterImport`). `update -f`
 compares the manifest with the stored object, prints each change (for example
 `spec.release_channel: Beta → Alpha`), and applies only those. A field the manifest
 leaves out is left as it is. `--wait` follows an operation to its end.
@@ -2598,6 +2529,13 @@ Roll back:
   the controller to 0, restore the CRDs, definitions and channels from a backup of
   that build, and accept that status fields only the newer build knows are lost.
 
+Serial 2 removed sub-tenants and Capsule (CRDs, definitions and `release.yaml`
+changed; RenderVersion stays 12). Delete the `naas` section from `platform.yaml`
+before deploying it: both processes refuse to start with it. Its controller
+releases the old `SubTenant` objects and deletes their CRD
+([Sub-tenant removal](#sub-tenant-removal)), and Capsule leaves each cluster as a
+catalog change ([Capsule removal](#platform-components)).
+
 ### Runbook: orphaned EKS name reservation
 
 A reservation (`cv-eks-name-*` ConfigMap in `kube-system`) is orphaned when its
@@ -2735,9 +2673,6 @@ What is not verified, or not built. Anything not on this list works as described
 
 - **Not run against real AWS, EKS or Crossplane.** Every test runs against a fake API
   server. The provider upgrade runbook is not run end to end.
-- **Sub-tenant isolation is not tested at runtime.** Access opens on observed objects
-  only; whether the cluster enforces them (network policy, admission, RBAC) is not
-  checked by the platform.
 - **Ordered deletion through Usages is untested**: the fake server has no Usage
   webhook, so the refusals and waits of the webhook are not exercised.
 - **CEL rules** in the CRDs are not loaded into a real API server.
@@ -2777,8 +2712,10 @@ What is not verified, or not built. Anything not on this list works as described
 - **A release's `default` minor is not applied.** A cluster on no channel keeps the
   version it asks for, or EKS's default, although `release.yaml` marks one minor as
   `default`.
-- **Sub-tenant access** opens only for groups in `naas.allowedGroups`. The list ships
-  empty, so access stays closed until an operator sets it.
+- **Sub-tenant leftovers stay on workload clusters.** Releasing an older build's
+  `SubTenant` objects and removing Capsule leaves Capsule's CRDs, the sub-tenants'
+  namespaces and their RBAC in place ([Sub-tenant removal](#sub-tenant-removal)).
+  Deleting them is the tenant's.
 - **No authorization.** The API authenticates callers and nothing more: any
   authenticated user (and, with `auth.mode: none`, any caller) can act on every tenant
   and on the platform. Who may sign in is decided at the identity provider.

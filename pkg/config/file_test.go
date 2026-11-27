@@ -88,6 +88,8 @@ func TestLoadFileRejects(t *testing.T) {
 		{name: "not a mapping", body: "- a\n- b\n", wantName: "mapping"},
 		{name: "invalid yaml", body: "log-level: [\n", wantName: "yaml"},
 		{name: "null value", body: "log-level:\n", wantName: "log-level"},
+		// Removed with sub-tenants: refused, saying so.
+		{name: "the removed naas section", body: "naas:\n  allowedGroups: [\"cv-*\"]\n", wantName: "removed with sub-tenants"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

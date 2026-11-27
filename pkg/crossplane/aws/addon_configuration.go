@@ -11,8 +11,8 @@ import (
 // tenant's, with the default node pool's placement added (only keys the
 // tenant left unset) and the add-on's enforced keys written over it
 // (configuration in addons.yaml). The enforced keys win because they carry
-// a platform guarantee (vpc-cni's network policy enforcement isolates
-// sub-tenants); the tenant's other keys, nested ones included, stay.
+// a platform guarantee (vpc-cni enforces NetworkPolicy on every cluster);
+// the tenant's other keys, nested ones included, stay.
 //
 // It is the tenant's configuration as it is when there is nothing to add,
 // and when the configuration is not a JSON or YAML object or a placement

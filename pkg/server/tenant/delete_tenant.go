@@ -34,7 +34,6 @@ type dependentKind struct {
 }
 
 var tenantDependents = []dependentKind{
-	{"sub-tenants", func() client.ObjectList { return &cloudv1alpha1.SubTenantList{} }},
 	{"components", func() client.ObjectList { return &cloudv1alpha1.ComponentList{} }},
 	{"clusters", func() client.ObjectList { return &cloudv1alpha1.ClusterList{} }},
 	{"networks", func() client.ObjectList { return &cloudv1alpha1.NetworkList{} }},
@@ -76,7 +75,7 @@ func (s *TenantService) DeleteTenant(ctx context.Context, req *v1.DeleteTenantRe
 	}
 	if len(remaining) > 0 {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf(
-			"tenant %s still has %s; delete them first (sub-tenants, components, clusters, networks, then accounts)",
+			"tenant %s still has %s; delete them first (components, clusters, networks, then accounts)",
 			id, strings.Join(remaining, ", ")))
 	}
 	info := directoryInfo(id, row.CreatedAt)

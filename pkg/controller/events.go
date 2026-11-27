@@ -91,8 +91,6 @@ func objectOf(obj platform.Object) client.Object {
 		return &cloudv1alpha1.Network{ObjectMeta: meta}
 	case platform.KindCluster:
 		return &cloudv1alpha1.Cluster{ObjectMeta: meta}
-	case platform.KindSubTenant:
-		return &cloudv1alpha1.SubTenant{ObjectMeta: meta}
 	case platform.KindRelease:
 		return &cloudv1alpha1.Release{ObjectMeta: meta}
 	case platform.KindReleaseChannel:

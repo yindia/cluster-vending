@@ -168,7 +168,6 @@ const (
 	KindCloudAccount   = "CloudAccount"
 	KindNetwork        = "Network"
 	KindCluster        = "Cluster"
-	KindSubTenant      = "SubTenant"
 	KindRelease        = "Release"
 	KindReleaseChannel = "ReleaseChannel"
 )

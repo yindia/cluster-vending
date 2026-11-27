@@ -55,7 +55,6 @@ func TestRunAnswersRPCsAndStopsOnCancel(t *testing.T) {
 		"cloud.v1.NetworkService/ImportNetwork":    http.StatusBadRequest,
 		"cloud.v1.TenantService/BootstrapTenant":   http.StatusBadRequest,
 		"cloud.v1.TenantService/ListCloudAccounts": http.StatusBadRequest,
-		"cloud.v1.SubTenantService/GetSubTenant":   http.StatusBadRequest,
 	} {
 		url := "http://" + ln.Addr().String() + "/" + rpc
 		res, err := client.Post(url, "application/json", strings.NewReader("{}"))

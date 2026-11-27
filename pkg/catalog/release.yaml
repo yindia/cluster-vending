@@ -42,7 +42,6 @@ kubernetes:
 # group, istio-* or kyverno*, is overridden together).
 components:
   aws-load-balancer-controller: "3.6.2"
-  capsule: "0.15.2"
   external-secrets: "2.15.0"
   gpu-operator: "v26.7.2"
   istio-base: "1.32.0"

@@ -111,9 +111,9 @@ func checkedSet(t *testing.T, defs []*cloudv1alpha1.ComponentDefinition, rel *cl
 	return out
 }
 
-// planOf plans defs under rel's first minor, NaaS on or off, and returns
-// the planned component names in install order.
-func planOf(t *testing.T, defs []*cloudv1alpha1.ComponentDefinition, rel *cloudv1alpha1.Release, naas bool) []string {
+// planOf plans defs under rel's first minor and returns the planned
+// component names in install order.
+func planOf(t *testing.T, defs []*cloudv1alpha1.ComponentDefinition, rel *cloudv1alpha1.Release) []string {
 	t.Helper()
 	items := make([]cloudv1alpha1.ComponentDefinition, 0, len(defs))
 	for _, d := range defs {
@@ -132,7 +132,7 @@ func planOf(t *testing.T, defs []*cloudv1alpha1.ComponentDefinition, rel *cloudv
 		}
 		pins[c.Name] = component.Pin{Version: c.Version, Values: values}
 	}
-	in := component.PlatformInput{Entries: component.ForNaaS(entries, naas), Release: rel.Name, Pins: pins,
+	in := component.PlatformInput{Entries: entries, Release: rel.Name, Pins: pins,
 		Cluster: component.Cluster{Name: "prod", Running: true, KubernetesMinor: k.Minor, IRSA: true},
 		Vars:    shippedVars,
 		Plan: crossplaneaws.PlatformPlan{Namespace: "tenant-acme", TenantID: "acme", ClusterID: "c-1",
@@ -175,7 +175,7 @@ func TestAnOrdinaryComponentIsDataOnly(t *testing.T) {
 	if problems := checkedSet(t, defs, rel); len(problems) > 0 {
 		t.Fatalf("controller --check:\n%s", strings.Join(problems, "\n"))
 	}
-	order := planOf(t, defs, rel, true)
+	order := planOf(t, defs, rel)
 	at, kyverno := slices.Index(order, "metrics-agent"), slices.Index(order, "kyverno")
 	if at < 0 || at < kyverno {
 		t.Errorf("planned %v: metrics-agent must follow kyverno, which it requires", order)
@@ -195,17 +195,15 @@ func TestAnOrdinaryComponentIsDataOnly(t *testing.T) {
 	}
 }
 
-// The special components are found by their role, not their name: the
-// shipped Karpenter and Capsule files renamed still pass the check, the
-// NodeProvisioner still installs first on the system group, and the
-// NamespaceTenancy definition is still installed only with NaaS.
+// The special component is found by its role, not its name: the shipped
+// Karpenter file renamed still passes the check, and the NodeProvisioner
+// still installs first on the system group.
 func TestTheRolesNotTheNamesDriveTheSpecialComponents(t *testing.T) {
 	shipped, _ := shippedCatalog(t)
 	nodes, rel := renamed(t, "karpenter.yaml", "karpenter", "nodes", DefaultRelease())
-	tenancy, rel := renamed(t, "capsule.yaml", "capsule", "tenancy", rel)
-	defs := []*cloudv1alpha1.ComponentDefinition{nodes, tenancy}
+	defs := []*cloudv1alpha1.ComponentDefinition{nodes}
 	for _, d := range shipped {
-		if d.Name != "karpenter" && d.Name != "capsule" {
+		if d.Name != "karpenter" {
 			defs = append(defs, d)
 		}
 	}
@@ -213,12 +211,8 @@ func TestTheRolesNotTheNamesDriveTheSpecialComponents(t *testing.T) {
 	if problems := checkedSet(t, defs, rel); len(problems) > 0 {
 		t.Fatalf("controller --check:\n%s", strings.Join(problems, "\n"))
 	}
-	with, without := planOf(t, defs, rel, true), planOf(t, defs, rel, false)
-	if with[0] != "nodes" || without[0] != "nodes" {
-		t.Errorf("planned %v / %v: the NodeProvisioner installs first", with, without)
-	}
-	if !slices.Contains(with, "tenancy") || slices.Contains(without, "tenancy") {
-		t.Errorf("planned %v with NaaS, %v without: NamespaceTenancy is NaaS only", with, without)
+	if planned := planOf(t, defs, rel); planned[0] != "nodes" {
+		t.Errorf("planned %v: the NodeProvisioner installs first", planned)
 	}
 	items := make([]cloudv1alpha1.ComponentDefinition, 0, len(defs))
 	for _, d := range defs {
@@ -226,9 +220,6 @@ func TestTheRolesNotTheNamesDriveTheSpecialComponents(t *testing.T) {
 	}
 	if got := component.RoleNameOf(items, component.RoleNodeProvisioner, "aws"); got != "nodes" {
 		t.Errorf("node provisioner = %s, want nodes", got)
-	}
-	if got := component.RoleNameOf(items, component.RoleNamespaceTenancy, "aws"); got != "tenancy" {
-		t.Errorf("namespace tenancy = %s, want tenancy", got)
 	}
 	_, bootstrap := catalog.CheckBootstrapSizing(decoded(t, defs), config.DefaultNodeGroups().System)
 	if !strings.Contains(bootstrap, "karpenter ") {

@@ -17,9 +17,8 @@ cluster; not yet run in production.
 | **Accounts** | Onboards a tenant's AWS account through an IAM role it creates with a CloudFormation stack the CLI prints, then verifies access. |
 | **Networks** | VPC, subnets, gateways, routes and flow logs, from a layout; import an existing VPC. |
 | **Clusters** | EKS with encryption, logging, access entries, OIDC, IRSA and EKS add-ons. Node groups are the platform's: a fixed-size system group (Karpenter and the EKS add-ons) and Karpenter's `platform-pool` (everything else). |
-| **Components** | A catalog of Helm charts (Karpenter, the AWS Load Balancer Controller, Istio, Kyverno, External Secrets, Capsule, the GPU Operator, …) installed in order and kept at the versions their release pins. Tenants enable the tenant ones; the platform installs its own. |
+| **Components** | A catalog of Helm charts (Karpenter, the AWS Load Balancer Controller, Istio, Kyverno, External Secrets, the GPU Operator, …) installed in order and kept at the versions their release pins. Tenants enable the tenant ones; the platform installs its own. |
 | **Releases and upgrades** | Channels (alpha, beta, stable) offer releases; changes reach clusters tier by tier, with soak, maintenance windows and freezes. Kubernetes upgrades are automatic on a channel. Older minors are offered as extended support, upgraded by hand. |
-| **Sub-tenants** | Namespace tenancy inside a cluster (Capsule), with their own access. |
 | **Insights** | Live node lists, deprecated-API scans, resource recommendations from a week of usage, and policy violations. |
 | **Import and takeover** | Observe an existing cluster read-only, then take it over without recreating it. |
 
@@ -33,7 +32,7 @@ custom resources are its only storage; there is no database.
 | API server | `serve` | Validates and stores requests; serves the API (Connect/gRPC). Holds no AWS or workload-cluster credentials. |
 | Controller | `controller` | Reconciles everything: renders Crossplane resources, installs components, rolls out upgrades, deletes in order. The only process that changes AWS. |
 | Live reader | `live` | Reads node lists and totals from workload clusters, read-only, for the API. |
-| CLI | `cluster-vending <group> <verb>` | Calls the API: `tenant`, `account`, `network`, `cluster`, `component`, `subtenant`, `admin`. |
+| CLI | `cluster-vending <group> <verb>` | Calls the API: `tenant`, `account`, `network`, `cluster`, `component`, `admin`. |
 | Console | [`ui/`](ui/README.md) | The tenant web console (Next.js), at port 3000. |
 
 ## Quickstart (local)

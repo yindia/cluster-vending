@@ -158,7 +158,7 @@ The full list with comments is [values.yaml](values.yaml), and
 (`--config`), so they cannot disagree. Both pods carry a checksum of it and
 restart when it changes. `aws.*` values are added to it as flat keys
 (`aws-management-role-arn`, ...). Keys are the commands' flag names plus the
-`auth`, `naas`, `nodeGroups` and `providers` sections ([docs/architecture.md, section
+`auth`, `nodeGroups` and `providers` sections ([docs/architecture.md, section
 5](../../docs/architecture.md#5-configuration)). `platform.providers` tunes the
 Crossplane providers (replicas, poll, reconcile rate, resources; defaults and
 per-provider overrides); the controller applies it on every start

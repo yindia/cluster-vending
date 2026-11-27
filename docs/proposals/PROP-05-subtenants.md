@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Accepted; phases 0 and 1 implemented; qualification (6.1) removed on 2026-11-23, see 10 |
+| Status | Withdrawn (2026-11-27): sub-tenants removed from the platform |
 | Author | `<author>` |
 | Date | 2026-11-22 |
 | Reviewers | `<reviewers>` |

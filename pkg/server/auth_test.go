@@ -50,7 +50,6 @@ func TestHandlerAuthenticatesTheServices(t *testing.T) {
 	for _, rpc := range []string{
 		"cloud.v1.ClusterService/GetCluster", "cloud.v1.NetworkService/ImportNetwork",
 		"cloud.v1.TenantService/BootstrapTenant", "cloud.v1.TenantService/WhoAmI", "cloud.v1.AdminService/Freeze",
-		"cloud.v1.SubTenantService/GetSubTenant", "cloud.v1.SubTenantService/CreateSubTenant",
 	} {
 		if got := post(rpc, ""); got != http.StatusUnauthorized {
 			t.Errorf("%s without a token: status %d, want 401", rpc, got)

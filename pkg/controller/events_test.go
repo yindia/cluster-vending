@@ -31,8 +31,6 @@ func TestEventsRecordOnTheObject(t *testing.T) {
 			want: "Warning Failed NodeGroup ng: 50% done"},
 		{name: "an object that is gone", obj: platform.Object{Kind: "Cluster", Namespace: "tenant-acme", Name: "gone"},
 			want: "Warning Failed NodeGroup ng: 50% done"},
-		{name: "a subtenant", obj: platform.Object{Kind: platform.KindSubTenant, Namespace: "tenant-acme", Name: "allocation"},
-			want: "Warning Failed NodeGroup ng: 50% done"},
 		{name: "a cluster-scoped object", obj: platform.Object{Kind: "ReleaseChannel", Name: "alpha"},
 			want: "Warning Failed NodeGroup ng: 50% done"},
 		{name: "a kind the controller does not know", obj: platform.Object{Kind: "Secret", Namespace: "x", Name: "y"}},

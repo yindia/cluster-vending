@@ -30,9 +30,6 @@ func TestRolesAreFoundByRoleThenByTheShippedName(t *testing.T) {
 	if component.RoleOf(legacy, []component.Definition{legacy, declared}) != component.RoleNone {
 		t.Error("karpenter is ordinary once another definition declares the role")
 	}
-	if _, ok := component.NamespaceTenancy([]component.Definition{declared, legacy}, "aws"); ok {
-		t.Error("a catalog without Capsule has no NamespaceTenancy")
-	}
 }
 
 func TestCheckCatalogHoldsOneDefinitionPerRolePerCloud(t *testing.T) {
@@ -48,8 +45,9 @@ func TestCheckCatalogHoldsOneDefinitionPerRolePerCloud(t *testing.T) {
 			def("b", "gcp", component.RoleNodeProvisioner, component.Platform)}, ""},
 		{"two on one cloud", []component.Definition{def("a", "aws", component.RoleNodeProvisioner, component.Platform),
 			def("b", "aws", component.RoleNodeProvisioner, component.Platform)}, "a and b both declare role NodeProvisioner on aws"},
-		{"a tenant component", []component.Definition{def("t", "aws", component.RoleNamespaceTenancy, component.Tenant)}, "t: role NamespaceTenancy is for a Platform component only"},
+		{"a tenant component", []component.Definition{def("t", "aws", component.RoleNodeProvisioner, component.Tenant)}, "t: role NodeProvisioner is for a Platform component only"},
 		{"an unknown role", []component.Definition{def("x", "aws", "Gateway", component.Platform)}, `x: role "Gateway" is not one of`},
+		{"the removed NamespaceTenancy role", []component.Definition{def("capsule", "aws", "NamespaceTenancy", component.Platform)}, `capsule: role "NamespaceTenancy" is not one of`},
 	}
 	for _, tt := range tests {
 		got := strings.Join(component.CheckCatalog(tt.defs), "\n")

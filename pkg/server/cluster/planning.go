@@ -10,19 +10,14 @@ import (
 	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/proto"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	corecluster "github.com/yindia/cluster-vending/pkg/cluster"
-	"github.com/yindia/cluster-vending/pkg/component"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 	"github.com/yindia/cluster-vending/pkg/crossplane/managed"
 	"github.com/yindia/cluster-vending/pkg/crossplane/planning"
 	"github.com/yindia/cluster-vending/pkg/database/model"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
-	"github.com/yindia/cluster-vending/pkg/kube"
 	reconcilecluster "github.com/yindia/cluster-vending/pkg/reconcile/cluster"
 	"github.com/yindia/cluster-vending/pkg/server/service"
 )
@@ -133,11 +128,6 @@ func (s *ClusterService) planUpdate(ctx context.Context, req *cloudv1.UpdateClus
 		default:
 		}
 	}
-	capsuleVersions, err := s.planNaaS(ctx, row, spec, plan)
-	if err != nil {
-		return nil, err
-	}
-	versions = append(versions, capsuleVersions...)
 	versions = append(versions, "cluster="+row.ID+"/"+row.ETag)
 	plan.PlanId, err = planID(req, versions)
 	if err != nil {
@@ -198,64 +188,4 @@ func planID(req *cloudv1.UpdateClusterRequest, versions []string) (string, error
 		r.Cluster.Etag = ""
 	}
 	return planning.ID(r, versions)
-}
-
-// The NamespaceTenancy definition's (Capsule's) Releases are component-owned,
-// outside the cluster-owned inventory rendered above. Describe the NaaS
-// transition explicitly and bind review to the current Release version
-// without changing the workload cluster. Its main chart's Helm release is
-// named after the definition (tenancyName).
-func (s *ClusterService) planNaaS(ctx context.Context, row *model.Cluster, desired *cloudv1.ClusterSpec, plan *cloudv1.Plan) ([]string, error) {
-	current, err := reconcilecluster.SpecOf(row)
-	if err != nil {
-		return nil, service.ToConnect(err)
-	}
-	if current.GetNaas() == desired.GetNaas() {
-		return nil, nil
-	}
-	tenancy := s.tenancyName(ctx, row)
-	name := crossplaneaws.HelmReleaseObjectName(crossplaneaws.ClusterPrefix(row.TenantID, row.ID, row.Name), tenancy)
-	namespace := kube.TenantNamespace(row.TenantID)
-	live := &unstructured.Unstructured{}
-	live.SetGroupVersionKind(crossplaneaws.HelmReleaseGVK)
-	version := "capsule-release=absent"
-	if err := s.deps.Reader().Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, live); err == nil {
-		version = "capsule-release=" + planning.ObjectVersion(live)
-	} else if !apierrors.IsNotFound(err) {
-		return nil, connect.NewError(connect.CodeUnavailable, "cannot verify namespace tenancy controls for plan review")
-	}
-	action := cloudv1.PlannedAction_PLANNED_ACTION_CREATE
-	detail := "Enable Namespace as a Service: add support for team namespaces with separate access, quotas, and policies. Setup continues after this update is accepted."
-	if !desired.GetNaas() {
-		action = cloudv1.PlannedAction_PLANNED_ACTION_DELETE
-		detail = "Disable Namespace as a Service: turn off namespace tenancy controls for this cluster. Existing namespaces, workloads, and data are not deleted by this change. Review the impact on teams using these controls before applying."
-	}
-	plan.Warnings = append(plan.Warnings, detail)
-	if reconcilecluster.ReleaseMoving(row) {
-		plan.Warnings = append(plan.Warnings, "This change will take effect after the current platform upgrade finishes. A halted upgrade must be resolved first.")
-	}
-	for _, change := range plan.Changes {
-		if change.Kind == crossplaneaws.HelmReleaseGVK.Kind && change.Name == name && change.Namespace == namespace && change.Action == action {
-			change.SpecPath = "spec.naas"
-			change.Detail += "; " + detail
-			return []string{version}, nil
-		}
-	}
-	plan.Changes = append(plan.Changes, &cloudv1.PlannedChange{
-		ApiVersion: crossplaneaws.HelmReleaseGVK.GroupVersion().String(), Kind: crossplaneaws.HelmReleaseGVK.Kind,
-		Name: name, Namespace: namespace, ExternalName: tenancy, SpecPath: "spec.naas", Action: action, Detail: detail,
-	})
-	return []string{version}, nil
-}
-
-// tenancyName is the name of the catalog's NamespaceTenancy definition for
-// the cluster's cloud (component.RoleNamespaceTenancy); the shipped one's
-// when the catalog cannot be read.
-func (s *ClusterService) tenancyName(ctx context.Context, row *model.Cluster) string {
-	list := &cloudv1alpha1.ComponentDefinitionList{}
-	if err := s.deps.Reader().List(ctx, list); err != nil {
-		s.logger().WarnContext(ctx, "plan: the component catalog cannot be read; namespace tenancy is taken to be the shipped definition", "cluster_id", row.ID, "error", err)
-		return component.RoleName(nil, component.RoleNamespaceTenancy, string(row.Provider))
-	}
-	return component.RoleNameOf(list.Items, component.RoleNamespaceTenancy, string(row.Provider))
 }

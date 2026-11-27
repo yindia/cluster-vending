@@ -14,6 +14,7 @@ import (
 // you bump Serial; never change an old one.
 var shippedContent = map[int64]string{
 	1: "5a46c40f7727f146",
+	2: "60d50e558ac8f4ea", // sub-tenants, spec.naas and Capsule removed
 }
 
 // contentFiles are the files a build installs into the management cluster

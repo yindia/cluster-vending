@@ -22,7 +22,7 @@ import (
 )
 
 // Serial is this build's serial. It only ever goes up.
-const Serial int64 = 1
+const Serial int64 = 2
 
 // Annotation holds the serial of the build that last wrote an object.
 const Annotation = "cloud.cluster-vending.io/build-serial"

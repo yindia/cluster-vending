@@ -18,7 +18,6 @@ known gaps (declared but not implemented) are described in
 | `tenant_service.proto` | `TenantService`; `CloudAccount`, `AwsAccount`, `CloudAccountStatus` |
 | `network_service.proto`, `network.proto` | `NetworkService`; `Network`, `NetworkSpec`, `NetworkLayout`, `Subnet`, `NetworkFlowLogs`, `NetworkStatus` |
 | `cluster_service.proto`, `cluster.proto` | `ClusterService`; `Cluster`, `ClusterSpec` with its CEL rules, `ClusterStatus`, `ClusterUpgrade` |
-| `subtenant_service.proto`, `subtenant.proto` | `SubTenantService`; `SubTenant` and its access types |
 | `component_service.proto`, `component.proto`, `component_cloud.proto` | `ComponentService`; `Component`, `ComponentDefinition`, the cloud IAM of a component |
 | `admin_service.proto`, `admin_release.proto`, `admin_freeze.proto`, `freeze.proto` | `AdminService`; release and channel views; freeze targets and status |
 | `control_plane.proto`, `node_pool.proto`, `node_group.proto`, `access.proto` | Control plane, node pools and node groups, access entries and OIDC |

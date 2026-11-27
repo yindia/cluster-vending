@@ -3,7 +3,6 @@
 # It should be run by config/default
 resources:
 - bases/cloud.cluster-vending.io_tenants.yaml
-- bases/cloud.cluster-vending.io_subtenants.yaml
 - bases/cloud.cluster-vending.io_cloudaccounts.yaml
 - bases/cloud.cluster-vending.io_networks.yaml
 - bases/cloud.cluster-vending.io_clusters.yaml

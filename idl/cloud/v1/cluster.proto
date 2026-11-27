@@ -221,11 +221,11 @@ message ClusterSpec {
   // upgrade_mode; changing it changes no cloud resource.
   MaintenanceWindow maintenance_window = 14;
 
-  // Enable namespace-as-a-service through the platform-managed Capsule installation.
-  // Unset defaults to false. Mutable: true installs Capsule; false removes its
-  // managed Helm installation. Existing tenant workloads and CRDs may remain.
-  // cert-manager is an external prerequisite and is not installed by this flag.
-  optional bool naas = 15;
+  // naas was namespace-as-a-service (Capsule), removed with sub-tenants. A
+  // binary request that still carries field 15 is refused
+  // (INVALID_ARGUMENT); JSON drops it. Stored values are ignored.
+  reserved 15;
+  reserved "naas";
 
   // node_groups were tenant Karpenter node groups. The platform owns a
   // cluster's node groups; a binary request that still carries field 16 is

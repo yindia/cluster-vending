@@ -18,7 +18,7 @@ var (
 	reasonPattern    = regexp.MustCompile(`^[A-Z][A-Za-z]{0,47}$`)
 	componentPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 	eventKinds       = map[string]string{"CloudAccount": "cloudaccount", "Network": "network", "Cluster": "cluster",
-		"SubTenant": "subtenant", "Release": "release", "ReleaseChannel": "releasechannel"}
+		"Release": "release", "ReleaseChannel": "releasechannel"}
 	resultKinds = []string{"deprecations", "recommendations", "violations", "violation-events", "nodes"}
 )
 

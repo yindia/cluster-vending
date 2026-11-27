@@ -39,7 +39,7 @@ func TestCatalogHasTheOfferedComponents(t *testing.T) {
 	for _, d := range definitions(t) {
 		names = append(names, d.Name)
 	}
-	want := []string{"aws-load-balancer-controller", "capsule", "external-secrets", "gpu-operator", "istio", "istio-base",
+	want := []string{"aws-load-balancer-controller", "external-secrets", "gpu-operator", "istio", "istio-base",
 		"istio-cni",
 		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "kyverno-policies", "ztunnel"}
 	if !slices.Equal(names, want) {
@@ -137,8 +137,7 @@ func TestCatalogIsConsistent(t *testing.T) {
 }
 
 // Tenants see and may enable exactly gpu-operator and kyverno-policies;
-// everything else is platform managed (Capsule additionally needs NaaS),
-// and the Component API refuses
+// everything else is platform managed, and the Component API refuses
 // it.
 func TestWhoControlsWhat(t *testing.T) {
 	defs := catalogDefinitions(t)
@@ -150,7 +149,7 @@ func TestWhoControlsWhat(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := definitionNames(platform)
-	want := []string{"karpenter", "aws-load-balancer-controller", "capsule", "external-secrets", "istio-base", "istiod",
+	want := []string{"karpenter", "aws-load-balancer-controller", "external-secrets", "istio-base", "istiod",
 		"istio-cni", "istio-ingress-gateway", "kyverno", "ztunnel"}
 	if !slices.Equal(got, want) {
 		t.Errorf("installed with the cluster, in order: %v, want %v", got, want)
@@ -217,7 +216,6 @@ func TestIstioBundle(t *testing.T) {
 var placedWorkloads = map[string][][]any{
 	// Paths of the values at which a nodeSelector and tolerations are set.
 	"aws-load-balancer-controller": {{}},
-	"capsule":                      {{}, {"global", "jobs", "kubectl"}}, // the Deployment, and the CRD and delete hook Jobs
 	"istiod":                       {{}},
 	"istio-ingress-gateway":        {{}},
 	"kyverno":                      {{"global"}},

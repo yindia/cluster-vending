@@ -125,6 +125,10 @@ func (m *Manifest) decode(fields map[string]any, msg proto.Message) error {
 			return fmt.Errorf("%s %s: %w: the platform owns a cluster's node groups (its system group and Karpenter platform pool); "+
 				"remove defaultNodePool, aws.defaultNodePool and nodeGroups from the manifest", m.Kind, m.Metadata.Name, err)
 		}
+		if strings.Contains(err.Error(), `unknown field "naas"`) {
+			return fmt.Errorf("%s %s: %w: naas was removed with sub-tenants (the platform no longer installs Capsule); remove it from the manifest",
+				m.Kind, m.Metadata.Name, err)
+		}
 		return fmt.Errorf("%s %s: %w", m.Kind, m.Metadata.Name, err)
 	}
 	return nil

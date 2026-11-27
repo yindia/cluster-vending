@@ -532,10 +532,6 @@ func TestServerRoleOnlyStoresAndReads(t *testing.T) {
 	for _, need := range [][3]string{
 		{"cloud.cluster-vending.io", "networks", "update"}, {"cloud.cluster-vending.io", "clusters", "delete"},
 		{"cloud.cluster-vending.io", "cloudaccounts", "create"}, {"", "namespaces", "create"},
-		{"cloud.cluster-vending.io", "subtenants", "create"},
-		{"cloud.cluster-vending.io", "subtenants", "list"},
-		{"cloud.cluster-vending.io", "subtenants", "update"},
-		{"cloud.cluster-vending.io", "subtenants", "delete"},
 	} {
 		if !allows(server, need[0], need[1], need[2]) {
 			t.Errorf("server role: no %s on %s.%s", need[2], need[1], need[0])

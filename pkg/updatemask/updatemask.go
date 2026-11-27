@@ -32,7 +32,6 @@ var Cluster = []string{
 	"spec.control_plane.kubernetes_version",
 	"spec.control_plane.secrets_encryption",
 	"spec.maintenance_window",
-	"spec.naas",
 	"spec.release_channel",
 	"spec.upgrade_mode",
 }

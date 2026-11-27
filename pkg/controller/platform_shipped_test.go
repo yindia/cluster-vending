@@ -31,7 +31,7 @@ func shippedVars(name string) component.Vars {
 }
 
 // The shipped catalog and the shipped release plan on every Kubernetes
-// minor with NaaS enabled: every Platform component is installed (none left out, none
+// minor: every Platform component is installed (none left out, none
 // waiting on a running cluster), each chart at a pinned version, in an
 // order that puts a component after what it requires, with valid names.
 func TestShippedPlatformComponentsPlan(t *testing.T) {
@@ -44,7 +44,7 @@ func TestShippedPlatformComponentsPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"aws-load-balancer-controller", "capsule", "external-secrets", "istio-base", "istio-cni",
+	want := []string{"aws-load-balancer-controller", "external-secrets", "istio-base", "istio-cni",
 		"istio-ingress-gateway", "istiod", "karpenter", "kyverno", "ztunnel"} // kyverno ships enabled (d510cd1)
 	for _, k := range DefaultRelease().Spec.Content.Kubernetes {
 		t.Run(k.Minor, func(t *testing.T) {

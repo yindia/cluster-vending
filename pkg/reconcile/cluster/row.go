@@ -17,14 +17,19 @@ import (
 )
 
 // Numbers of removed ClusterSpec fields (reserved in the contract):
-// existing_cluster, default_node_pool and node_groups; and of the removed
-// AwsClusterSpec.default_node_pool.
+// existing_cluster, default_node_pool, naas and node_groups; and of the
+// removed AwsClusterSpec.default_node_pool.
 const (
 	existingClusterField    = 7
 	defaultNodePoolField    = 4
+	naasField               = 15
 	nodeGroupsField         = 16
 	awsDefaultNodePoolField = 4
 )
+
+// ErrNaaSRemoved is the message of a request that still sets spec.naas, the
+// namespace-as-a-service (Capsule) switch removed with sub-tenants.
+const ErrNaaSRemoved = "spec.naas was removed with sub-tenants: the platform no longer installs Capsule"
 
 // ErrNodeGroupsPlatformOwned is the message of a request that still sets the
 // node group fields a client built against an older contract has.
@@ -42,6 +47,8 @@ func supported(spec *cloudv1.ClusterSpec) error {
 		// creating a new cluster of the name instead would be wrong.
 		return fault.New(fault.Unimplemented,
 			"spec.existing_cluster is not supported; import a cluster with ImportCluster and TakeOverCluster")
+	case hasUnknownField(unknown, naasField):
+		return fault.New(fault.Invalid, ErrNaaSRemoved)
 	}
 	return NodeGroupFieldsRefused(spec)
 }

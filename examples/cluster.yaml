@@ -21,9 +21,6 @@ metadata:
   # keys 1-128 characters, values up to 256; reserved AWS/platform keys refused.
   labels: {env: prod, team: platform}   # filtering, and AWS tags on every resource
 spec:
-  naas: true                # enable namespace tenancy on create or an existing cluster
-  # To disable later, set naas: false. All SubTenants must first be deleted
-  # and finish cleanup; active or terminating SubTenants block disabling.
   region: us-west-1          # the network's region
   network:
     networkId: 01a1dfca-f5dd-7144-97b5-baeefe0e4a39   # NETWORK_ID

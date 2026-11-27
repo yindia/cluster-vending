@@ -54,8 +54,8 @@ func TestDefinitionRoleRules(t *testing.T) {
 		{"nodes", "  management: Platform\n  role: NodeProvisioner\n", false},
 		{"nodes", "  management: Platform\n  role: NodeProvisioner\n  disabled: true\n", true},
 		{"nodes", "  management: Platform\n  role: NodeProvisioner\n  disabled: false\n", false},
-		{"tenancy", "  management: Platform\n  role: NamespaceTenancy\n  disabled: true\n", false},
-		{"nodes", "  role: NodeProvisioner\n", true}, // management defaults to Tenant
+		{"tenancy", "  management: Platform\n  role: NamespaceTenancy\n", true}, // removed with sub-tenants
+		{"nodes", "  role: NodeProvisioner\n", true},                            // management defaults to Tenant
 		{"nodes", "  management: Platform\n  role: Gateway\n", true},
 		{"karpenter", "  sequence: 100\n", false},
 		{"other", "  sequence: 0\n", false},

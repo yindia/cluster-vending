@@ -88,7 +88,6 @@ func NewRootCmd() *cobra.Command {
 		newTenantCmd(),
 		newNetworkCmd(),
 		newClusterCmd(),
-		newSubTenantCmd(),
 		newComponentCmd(),
 		newAdminCmd(),
 		newLoginCmd(),

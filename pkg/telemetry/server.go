@@ -76,7 +76,7 @@ func NewStore(reg prometheus.Registerer) *Store {
 
 // storeKinds are the kinds the store keeps (cloudstore.Kinds); anything
 // else is "other".
-var storeKinds = map[string]bool{"Tenant": true, "SubTenant": true, "CloudAccount": true, "Network": true, "Cluster": true,
+var storeKinds = map[string]bool{"Tenant": true, "CloudAccount": true, "Network": true, "Cluster": true,
 	"Release": true, "ReleaseChannel": true, "ReleaseHold": true, "Component": true, "ComponentDefinition": true}
 
 func (s *Store) kind(scheme *runtime.Scheme, obj runtime.Object) string {

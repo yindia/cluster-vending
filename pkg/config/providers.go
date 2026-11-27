@@ -15,7 +15,7 @@ import (
 )
 
 // SectionProviders is the settings file's key of how the Crossplane
-// providers run (their DeploymentRuntimeConfigs). Like "naas" it is no
+// providers run (their DeploymentRuntimeConfigs). Like "auth" it is no
 // flag and no environment variable: LoadFile leaves it to LoadProviders,
 // and only the controller reads it.
 const SectionProviders = "providers"

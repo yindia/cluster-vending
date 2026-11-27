@@ -134,9 +134,6 @@ type Deps struct {
 	// those are available (docs/architecture.md#helm-operations). Nil:
 	// a component is Ready once Helm deployed it (tests).
 	Rollouts WorkloadClients
-	// SubTenantWorkloads opens provider-neutral workload clients using the parent
-	// cluster's namespaced kubeconfig reference. Only the controller has this.
-	SubTenantWorkloads SubTenantWorkloads
 	// RecoverStuckReleases lets the cluster reconcile remove the Helm
 	// record of a stuck revision in a workload cluster, so provider-helm
 	// can install again.
@@ -160,11 +157,6 @@ type Deps struct {
 	// AMI type, disk) and the platform pool, the only groups a cluster has.
 	// The zero value: the system defaults and no platform pool.
 	NodeGroups config.NodeGroups
-	// NaaS is the sub-tenant section of the config file (the same for the
-	// server and the controller): the OIDC groups a sub-tenant may name,
-	// which the API enforces and the controller checks again before it
-	// opens access. The zero value allows no group.
-	NaaS config.NaaS
 	// NoRecommendations turns the sampling for resource recommendations
 	// off (--recommendations=false).
 	NoRecommendations bool

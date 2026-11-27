@@ -2,18 +2,6 @@
 # (--config /etc/cluster-vending/platform.yaml): the same file, so they cannot
 # disagree (docs/architecture.md#node-groups-configuration).
 
-# Sub-tenant access (PROP-05 6.2): the OIDC groups a sub-tenant may name in
-# adminGroups and viewerGroups. Exact values, or a prefix ending in "*";
-# deniedGroups are checked first. Empty (the default): no group may be named
-# and sub-tenant access stays closed. The API server refuses a group outside
-# the list, and the controller closes access for a group that left it, so
-# keep this section the same in the server's and the controller's file.
-# naas:
-#   allowedGroups:
-#     - "cv-subtenant-*"
-#   deniedGroups:
-#     - "cv-platform-operators"
-
 nodeGroups:
   # Every cluster has exactly these two node groups, the platform's; tenants
   # define none. A change of instanceTypes, capacityType, amiType or

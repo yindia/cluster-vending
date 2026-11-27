@@ -25,13 +25,21 @@ import (
 // Keep secrets in the environment: it wins over the file.
 //
 // The top-level "auth" section is not a setting: it is the API server's
-// authentication, read by LoadAuth; the top-level "naas" section is the
-// sub-tenant group rules, read by LoadNaaS; the top-level "providers"
+// authentication, read by LoadAuth; the top-level "providers"
 // section is how the Crossplane providers run, read by LoadProviders. The
+// top-level "naas" section (sub-tenant groups) was removed with sub-tenants:
+// a file that still has it is refused (errRemovedNaaS). The
 // top-level "nodeGroups" section is
 // the platform admin's node group layout (nodeGroupsSection): its keys map
 // onto the node group settings, so a flag or variable still overrides one
 // value.
+// removedSectionNaaS was the file's sub-tenant section (PROP-05, withdrawn).
+const removedSectionNaaS = "naas"
+
+// errRemovedNaaS refuses a file that still has the removed "naas" section:
+// it configured nothing any more, and an operator should know.
+var errRemovedNaaS = errors.New(`the "naas" section was removed with sub-tenants (PROP-05, withdrawn); delete it from the file`)
+
 func LoadFile(path string) (LookupFunc, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -85,8 +93,8 @@ func flatten(n *yaml.Node, prefix string, out map[string]string) error {
 		if prefix == "" && key == SectionAuth {
 			continue // not a setting: LoadAuth reads it
 		}
-		if prefix == "" && key == SectionNaaS {
-			continue // not a setting: LoadNaaS reads it
+		if prefix == "" && key == removedSectionNaaS {
+			return errRemovedNaaS
 		}
 		if prefix == "" && key == SectionProviders {
 			continue // not a setting: LoadProviders reads it

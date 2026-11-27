@@ -95,8 +95,6 @@ type Options struct {
 	AWSAccess config.AWSAccess
 	// NodeGroups is the platform admin's node group layout.
 	NodeGroups config.NodeGroups
-	// NaaS is the config file's sub-tenant section (config.NaaS).
-	NaaS config.NaaS
 	// ReconcileWorkers is how many accounts, networks and clusters of each
 	// kind are reconciled at once (0: one).
 	ReconcileWorkers int
@@ -219,6 +217,12 @@ func Run(ctx context.Context, o Options) error {
 				"definitions", res.Foreign)
 		}
 	}
+	// Capsule was removed with sub-tenants: what is left of it in the
+	// catalog is switched off (after catalog.Sync deleted the shipped
+	// definition), before any cluster is reconciled.
+	if _, err := reconcilers.RetireNamespaceTenancy(ctx, direct, logger); err != nil {
+		return err
+	}
 	if o.AWS.StaticKeys != nil {
 		logger.Warn("AWS keys found in the environment: they are the controller's own credentials (local testing); every lookup still assumes the tenant role of the account it reads")
 	}
@@ -250,7 +254,6 @@ func Run(ctx context.Context, o Options) error {
 		NodeGroupClients: workloads,
 		// The same, to read whether a component's workloads rolled out.
 		Rollouts:             workloads,
-		SubTenantWorkloads:   management.SubTenantWorkloads(direct),
 		RecoverStuckReleases: o.RecoverStuckReleases,
 		HelmBackoffMax:       o.HelmBackoffMax,
 		HelmMaxFailures:      o.HelmMaxFailures,
@@ -262,7 +265,6 @@ func Run(ctx context.Context, o Options) error {
 		Logger:            logger,
 
 		NodeGroups: o.NodeGroups,
-		NaaS:       o.NaaS,
 	}, lookups)
 	checkCredentialsSecret(ctx, reconciling, logger)
 	// What happens to accounts, networks, clusters and releases is also a
@@ -275,6 +277,11 @@ func Run(ctx context.Context, o Options) error {
 		AutomaticUpgrades: o.AutomaticUpgrades, UpgradeTimeout: o.UpgradeTimeout}
 	if err := Setup(mgr, deps); err != nil {
 		return err
+	}
+	// Sub-tenants were removed: the leader releases the SubTenant objects an
+	// older build left, and deletes their CRD (once; a no-op after).
+	if err := mgr.Add(reconcilers.SubTenantRemoval(direct, logger)); err != nil {
+		return fmt.Errorf("add the sub-tenant removal: %w", err)
 	}
 	fleet := telemetry.NewFleet(mgr.GetClient())
 	if err := ctrlmetrics.Registry.Register(fleet); err != nil {

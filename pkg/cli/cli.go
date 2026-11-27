@@ -200,8 +200,6 @@ type Clients struct {
 	Admin   cloudv1connect.AdminServiceClient
 	// Component is the component catalog and a tenant's components.
 	Component cloudv1connect.ComponentServiceClient
-	// SubTenant is the namespace allocations of a cluster that runs Capsule.
-	SubTenant cloudv1connect.SubTenantServiceClient
 }
 
 // NewClients returns clients of the API at server (a base URL) over
@@ -226,7 +224,6 @@ func NewClients(server string, httpClient *http.Client, opts ...ClientOption) Cl
 		Cluster:   cloudv1connect.NewClusterServiceClient(c),
 		Admin:     cloudv1connect.NewAdminServiceClient(c),
 		Component: cloudv1connect.NewComponentServiceClient(c),
-		SubTenant: cloudv1connect.NewSubTenantServiceClient(c),
 	}
 }
 

@@ -3,7 +3,6 @@ package component
 import (
 	"fmt"
 	"slices"
-	"strings"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 )
@@ -25,25 +24,16 @@ import (
 //   - the platform pool is applied once it is Ready, and a catalog without
 //     one has no Karpenter node groups;
 //   - on deletion it is removed last, after the node groups (stage 5).
-//
-// RoleNamespaceTenancy (Capsule) runs namespace tenancy:
-//
-//   - it is installed only on clusters with spec.naas (ForNaaS), and what
-//     requires it is left out with it;
-//   - sub-tenants wait until it is Ready on their cluster;
-//   - a new release pin of it carries this build's NaaS bootstrap values
-//     (catalog.CapsuleBootstrapValues).
 type Role string
 
 // The roles.
 const (
-	RoleNone             Role = ""
-	RoleNodeProvisioner  Role = Role(cloudv1alpha1.ComponentRoleNodeProvisioner)
-	RoleNamespaceTenancy Role = Role(cloudv1alpha1.ComponentRoleNamespaceTenancy)
+	RoleNone            Role = ""
+	RoleNodeProvisioner Role = Role(cloudv1alpha1.ComponentRoleNodeProvisioner)
 )
 
 // Roles are every role, in a stable order.
-var Roles = []Role{RoleNodeProvisioner, RoleNamespaceTenancy}
+var Roles = []Role{RoleNodeProvisioner}
 
 // NodeProvisionerSequence is the sequence of the NodeProvisioner: it
 // installs before every other platform component.
@@ -56,14 +46,11 @@ const NodeProvisionerSequence int32 = 0
 // only for a definition that declares none.
 var legacyRole = map[Role]func(Definition) bool{
 	RoleNodeProvisioner: func(d Definition) bool { return d.Name == "karpenter" },
-	RoleNamespaceTenancy: func(d Definition) bool {
-		return d.Name == "capsule" || strings.HasSuffix(d.Chart, " capsule")
-	},
 }
 
 // fallbackName is the name of a role's definition when the catalog cannot
 // tell (it cannot be read, or has none): the shipped one's.
-var fallbackName = map[Role]string{RoleNodeProvisioner: "karpenter", RoleNamespaceTenancy: "capsule"}
+var fallbackName = map[Role]string{RoleNodeProvisioner: "karpenter"}
 
 // RoleOf is the role a definition of defs plays: its declared one, or the
 // legacy match (legacyRole). provider "" counts every cloud as one.
@@ -100,12 +87,6 @@ func WithRole(defs []Definition, role Role, provider string) []Definition {
 // false when there is none.
 func NodeProvisioner(defs []Definition, provider string) (Definition, bool) {
 	return first(WithRole(defs, RoleNodeProvisioner, provider))
-}
-
-// NamespaceTenancy is the NamespaceTenancy definition of defs on provider
-// ("" for any); false when there is none.
-func NamespaceTenancy(defs []Definition, provider string) (Definition, bool) {
-	return first(WithRole(defs, RoleNamespaceTenancy, provider))
 }
 
 // RoleName is the name of role's definition in defs on provider, or the

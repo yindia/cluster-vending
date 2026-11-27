@@ -27,7 +27,6 @@ spec:
       - kube-public
       - kube-node-lease
       - kyverno
-      - capsule-system
       - external-secrets
       - gpu-operator
       - istio-ingress

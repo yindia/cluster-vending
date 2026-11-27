@@ -529,12 +529,6 @@ type ClusterSpec struct {
 	// inside it; a started upgrade runs to its end. Mutable.
 	// +optional
 	MaintenanceWindow *MaintenanceWindow `json:"maintenanceWindow,omitempty"`
-	// naas enables the platform-managed Capsule namespace-as-a-service installation.
-	// Unset defaults to false. Disabling removes the installation; tenant
-	// workloads and CRDs may remain. cert-manager is an external prerequisite.
-	// +optional
-	// +kubebuilder:default=false
-	NaaS *bool `json:"naas,omitempty"`
 	// aws selects AWS (EKS) and carries its settings.
 	// +optional
 	AWS *AWSClusterSpec `json:"aws,omitempty"`

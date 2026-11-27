@@ -39,13 +39,12 @@ func TestDeleteTenantRefusesWhileObjectsRemain(t *testing.T) {
 		&cloudv1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "net-b"}},
 		&cloudv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "prod"}},
 		&cloudv1alpha1.Component{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "karpenter"}},
-		&cloudv1alpha1.SubTenant{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "team-a"}},
 	)
 	out, err := deleteTenant(t, s, "acme")
 	if out != nil || connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("DeleteTenant = %v, %v; want FAILED_PRECONDITION", out, err)
 	}
-	for _, want := range []string{"1 sub-tenant (team-a)", "1 component (karpenter)", "1 cluster (prod)", "2 networks (net-a, net-b)", "1 cloud account (aws-111122223333)"} {
+	for _, want := range []string{"1 component (karpenter)", "1 cluster (prod)", "2 networks (net-a, net-b)", "1 cloud account (aws-111122223333)"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %q", err, want)
 		}

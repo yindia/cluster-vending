@@ -271,6 +271,16 @@ rules:
   - create
   - update
   - patch
+# The removed SubTenant kind's CRD, which the controller deletes once after
+# releasing its objects (pkg/controller/subtenant_removal.go).
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  resourceNames:
+  - subtenants.cloud.cluster-vending.io
+  verbs:
+  - delete
 # Events on the platform's objects and of the leader election.
 - apiGroups:
   - ""

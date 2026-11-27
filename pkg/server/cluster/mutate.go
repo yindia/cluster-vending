@@ -39,6 +39,10 @@ const (
 // a path inside one, is refused with what replaced them.
 var removedNodeGroupPaths = []string{"spec.default_node_pool", "spec.aws.default_node_pool", "spec.node_groups"}
 
+// removedNaaSPath is the namespace-as-a-service switch, removed with
+// sub-tenants: an update that names it is refused with why.
+const removedNaaSPath = "spec.naas"
+
 // isRemovedNodeGroupPath reports whether path is, or is inside, one of
 // removedNodeGroupPaths.
 func isRemovedNodeGroupPath(path string) bool {
@@ -85,13 +89,6 @@ func automaticUpgradeRunning(row *model.Cluster) bool {
 // field of the request's spec onto the stored one. Every one of them but
 // releasePaths is rolled out by applying the cluster's resources again.
 var specPaths = map[string]func(dst, src *cloudv1.ClusterSpec){
-	"spec.naas": func(dst, src *cloudv1.ClusterSpec) {
-		if src == nil {
-			dst.Naas = nil
-		} else {
-			dst.Naas = src.Naas
-		}
-	},
 	pathUpgradeMode:    func(dst, src *cloudv1.ClusterSpec) { dst.UpgradeMode = src.GetUpgradeMode() },
 	pathReleaseChannel: func(dst, src *cloudv1.ClusterSpec) { dst.ReleaseChannel = src.GetReleaseChannel() },
 	pathMaintenanceWindow: func(dst, src *cloudv1.ClusterSpec) {
@@ -221,11 +218,6 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 	specChanged, err := applyMask(row, spec, in, paths)
 	if err != nil {
 		return nil, err
-	}
-	if slices.Contains(paths, "spec.naas") && !spec.GetNaas() {
-		if err := s.requireNoSubTenants(ctx, row, false); err != nil {
-			return nil, err
-		}
 	}
 	if err := s.CarriedOverConflict(ctx, row, spec); err != nil {
 		return nil, err
@@ -387,6 +379,9 @@ func applyMask(row *model.Cluster, spec *cloudv1.ClusterSpec, in *cloudv1.Cluste
 		case isRemovedNodeGroupPath(p):
 			return false, connect.NewError(connect.CodeInvalidArgument,
 				fmt.Sprintf("update_mask path %q cannot be updated: %s", p, reconcilecluster.ErrNodeGroupsPlatformOwned))
+		case p == removedNaaSPath:
+			return false, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Sprintf("update_mask path %q cannot be updated: %s", p, reconcilecluster.ErrNaaSRemoved))
 		case ok:
 			copyField(spec, in.GetSpec())
 		case p == "spec.aws.access_config.authentication_mode":
@@ -469,9 +464,6 @@ func (s *ClusterService) DeleteCluster(ctx context.Context, req *cloudv1.DeleteC
 	}
 	if etag := req.GetEtag(); etag != "" && etag != row.ETag {
 		return nil, connect.NewError(connect.CodeAborted, "etag mismatch: the cluster changed; get it again and retry")
-	}
-	if err := s.requireNoSubTenants(ctx, row, true); err != nil {
-		return nil, err
 	}
 	if row.State != reconcilecluster.StateDeleting || (req.GetForce() && !row.DeleteForce) {
 		row.State = reconcilecluster.StateDeleting

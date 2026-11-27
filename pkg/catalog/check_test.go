@@ -144,8 +144,8 @@ func TestCheckRules(t *testing.T) {
 			[]string{"ComponentDefinition/karpenter: spec.sequence must be 0"}},
 		{"two NodeProvisioners on one cloud", func(s *catalog.Set) { s.Definitions[1].Spec.Role = cloudv1alpha1.ComponentRoleNodeProvisioner },
 			[]string{"karpenter and mesh both declare role NodeProvisioner on aws"}},
-		{"a role on a Tenant component", func(s *catalog.Set) { s.Definitions[2].Spec.Role = cloudv1alpha1.ComponentRoleNamespaceTenancy },
-			[]string{"tool: role NamespaceTenancy is for a Platform component only"}},
+		{"a role on a Tenant component", func(s *catalog.Set) { s.Definitions[2].Spec.Role = cloudv1alpha1.ComponentRoleNodeProvisioner },
+			[]string{"tool: role NodeProvisioner is for a Platform component only"}},
 		{"karpenter on the platform pool", func(s *catalog.Set) { withValues(&s.Definitions[0], `{"nodeSelector":"${platform.nodeSelector}"}`) },
 			[]string{"ComponentDefinition/karpenter: the NodeProvisioner must not run on the platform pool"}},
 		{"another definition on the system group", func(s *catalog.Set) {

@@ -312,7 +312,7 @@ const (
 // ComponentRole is a part of the platform only one definition plays, per
 // cloud. The platform finds the definition by its role, never by its name;
 // what each role implies is in pkg/component/roles.go.
-// +kubebuilder:validation:Enum=NodeProvisioner;NamespaceTenancy
+// +kubebuilder:validation:Enum=NodeProvisioner
 type ComponentRole string
 
 // Component roles.
@@ -322,9 +322,6 @@ const (
 	// (${system.*}), it cannot be disabled, and the platform pool is applied
 	// once it is Ready.
 	ComponentRoleNodeProvisioner ComponentRole = "NodeProvisioner"
-	// ComponentRoleNamespaceTenancy runs namespace tenancy (Capsule): it is
-	// installed only on clusters with spec.naas, and sub-tenants wait for it.
-	ComponentRoleNamespaceTenancy ComponentRole = "NamespaceTenancy"
 )
 
 // SizedDeployment is a Deployment a component runs, as the sizing rule
@@ -451,7 +448,7 @@ type ComponentDefinitionSpec struct {
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 	Requires []string `json:"requires,omitempty"`
 	// role is the part of the platform this definition plays, if any:
-	// NodeProvisioner or NamespaceTenancy (ComponentRole). At most one
+	// NodeProvisioner (ComponentRole). At most one
 	// definition per cloud plays a role, and only a Platform one. Unset:
 	// an ordinary component, ordered by sequence and requires alone.
 	// +optional

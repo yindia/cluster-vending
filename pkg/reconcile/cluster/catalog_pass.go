@@ -109,8 +109,7 @@ func (s *Reconciler) catalogChange(ctx context.Context, row *model.Cluster, spec
 }
 
 // catalogEntries are the cluster's catalog entries this pass: each
-// platform definition it gets (for its cloud, NaaS or not: a cluster
-// without NaaS has nothing of Capsule to change), fingerprinted with its
+// platform definition it gets (for its cloud), fingerprinted with its
 // placeholder values, and the platform pool. removedSeq are the
 // sequences of every definition, for the order of removals, and
 // requires their requirements.

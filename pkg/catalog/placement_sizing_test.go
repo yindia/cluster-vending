@@ -53,7 +53,7 @@ func TestShippedCatalogFitsTheDefaultBootstrapGroup(t *testing.T) {
 	}
 	// Only the bootstrap set is counted: karpenter, coredns, the EBS
 	// controller and the DaemonSets, never kyverno or istiod.
-	for _, name := range []string{"kyverno", "istiod", "capsule", "external-secrets", "aws-load-balancer"} {
+	for _, name := range []string{"kyverno", "istiod", "external-secrets", "aws-load-balancer"} {
 		if strings.Contains(summary, name) {
 			t.Errorf("summary counts %s, which is not bootstrap:\n%s", name, summary)
 		}
@@ -127,7 +127,7 @@ func TestShippedCatalogFitsTheDefaultPlatformPool(t *testing.T) {
 	if len(problems) > 0 {
 		t.Errorf("%v\n%s", problems, summary)
 	}
-	for _, name := range []string{"kyverno-admission", "istiod", "capsule", "external-secrets", "aws-load-balancer-controller"} {
+	for _, name := range []string{"kyverno-admission", "istiod", "external-secrets", "aws-load-balancer-controller"} {
 		if !strings.Contains(summary, name) {
 			t.Errorf("summary lacks %s:\n%s", name, summary)
 		}

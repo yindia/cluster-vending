@@ -23,7 +23,7 @@ func TestEmbeddedDefinitions(t *testing.T) {
 		kind, _, _ := unstructured.NestedString(d.Object, "spec", "names", "kind")
 		kinds[kind] = d
 	}
-	want := []string{"Tenant", "SubTenant", "CloudAccount", "Network", "Cluster", "Release", "ReleaseChannel", "ReleaseHold", "Component", "ComponentDefinition"}
+	want := []string{"Tenant", "CloudAccount", "Network", "Cluster", "Release", "ReleaseChannel", "ReleaseHold", "Component", "ComponentDefinition"}
 	for _, kind := range want {
 		if kinds[kind] == nil {
 			t.Errorf("no definition of %s", kind)

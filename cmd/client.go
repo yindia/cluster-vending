@@ -278,7 +278,7 @@ func newTenantCmd() *cobra.Command {
 	return newResourceCmd("tenant", "Create, list and delete tenants, and manage their freezes (TenantService)", []verb{
 		{use: "create <tenant-id>", short: "Register a tenant and create its owned namespace before connecting accounts", run: cli.TenantCreate, idHelp: "tenant ID (DNS label)", args: cobra.ExactArgs(1)},
 		{use: "list", short: "List tenants visible to your identity; no --tenant required", run: cli.TenantList, args: cobra.NoArgs},
-		{use: "delete <tenant-id>", short: "Delete a tenant (refused, naming them, while it has accounts, networks, clusters, components or sub-tenants); its namespace is unregistered and kept",
+		{use: "delete <tenant-id>", short: "Delete a tenant (refused, naming them, while it has accounts, networks, clusters or components); its namespace is unregistered and kept",
 			run: cli.TenantDelete, idHelp: "tenant ID (DNS label)", args: cobra.ExactArgs(1), wait: true},
 		{use: "freeze", short: "Freeze this tenant, or one of its networks or clusters", run: cli.TenantFreeze, args: cobra.NoArgs, reason: true, until: true, wait: true, letThrough: true},
 		{use: "status", short: "Show this tenant's freeze confirmation", run: cli.TenantFreezeStatus, args: cobra.NoArgs, parent: "freeze", letThrough: true},

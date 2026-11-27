@@ -54,9 +54,8 @@
 # existing clusters: bump RenderVersion (addons_render_version_test.go).
 addons:
   # Its policy is on the node role. NetworkPolicy is enforced on every
-  # cluster (the node agent runs next to aws-node): the deny-by-default
-  # policies of sub-tenant isolation (pkg/naas/assets/bootstrap.yaml) are
-  # only text without it, and a sub-tenant's access waits for it
+  # cluster (the node agent runs next to aws-node): a tenant's
+  # NetworkPolicies are only text without it
   # (docs/architecture.md#network-policy-enforcement).
   - name: vpc-cni
     default: true

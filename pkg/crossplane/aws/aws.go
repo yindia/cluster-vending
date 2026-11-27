@@ -65,8 +65,7 @@ const ProviderVersion = "v2.9.0"
 //	12 vpc-cni enforces NetworkPolicy on every cluster (imported ones
 //	   too): enableNetworkPolicy "true" and nodeAgent.enabled true in its
 //	   configurationValues, written over the tenant's (configuration in
-//	   addons.yaml, addon_configuration.go). Sub-tenant isolation relies
-//	   on it; a sub-tenant's access waits for it
+//	   addons.yaml, addon_configuration.go)
 const RenderVersion = 12
 
 const (

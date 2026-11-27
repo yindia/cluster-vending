@@ -57,7 +57,7 @@ aws:
 # The shared settings file: ONE ConfigMap, mounted at
 # /etc/cluster-vending/platform.yaml into the server and the controller
 # (--config), so they cannot disagree. A change rolls both (a checksum
-# annotation). Keys are the commands' flag names plus the auth, naas,
+# annotation). Keys are the commands' flag names plus the auth,
 # nodeGroups and providers sections (docs/architecture.md#5-configuration). Never put a
 # secret here: secrets are referenced by name (e.g.
 # provider-credentials-secret: <namespace>/<name>), and the UI's come from
@@ -84,11 +84,6 @@ platform:
   #     issuer: https://login.example.com/realms/platform
   #     audiences: [cv-api]
   #     usernameClaim: preferred_username
-  #
-  # Sub-tenant access (PROP-05 6.2), read by both processes:
-  # naas:
-  #   allowedGroups: ["cv-subtenant-*"]
-  #   deniedGroups: ["cv-platform-operators"]
   nodeGroups:
     # Every cluster has exactly these two node groups, the platform's;
     # tenants define none. A change of instanceTypes, capacityType, amiType

@@ -105,12 +105,8 @@ func (r *TenantReconciler) deleteTenant(ctx context.Context, obj *cloudv1alpha1.
 	if err := r.deps.Direct.List(ctx, clusters, client.InNamespace(ns)); err != nil {
 		return ctrl.Result{}, err
 	}
-	subtenants := &cloudv1alpha1.SubTenantList{}
-	if err := r.deps.Direct.List(ctx, subtenants, client.InNamespace(ns)); err != nil {
-		return ctrl.Result{}, err
-	}
-	if len(networks.Items)+len(clusters.Items)+len(subtenants.Items) > 0 {
-		if err := r.reportTenant(ctx, obj, ns, metav1.ConditionFalse, "HasDependents", "Remove the tenant's SubTenants, networks and clusters before deleting its registration."); err != nil {
+	if len(networks.Items)+len(clusters.Items) > 0 {
+		if err := r.reportTenant(ctx, obj, ns, metav1.ConditionFalse, "HasDependents", "Remove the tenant's networks and clusters before deleting its registration."); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: failedDelay}, nil

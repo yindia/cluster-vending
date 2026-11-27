@@ -93,10 +93,9 @@ type api struct {
 }
 
 type clients struct {
-	cluster   cloudv1connect.ClusterServiceClient
-	admin     cloudv1connect.AdminServiceClient
-	tenant    cloudv1connect.TenantServiceClient
-	subtenant cloudv1connect.SubTenantServiceClient
+	cluster cloudv1connect.ClusterServiceClient
+	admin   cloudv1connect.AdminServiceClient
+	tenant  cloudv1connect.TenantServiceClient
 }
 
 func newAPI(t *testing.T, mode auth.Mode) *api {
@@ -113,7 +112,6 @@ func newAPI(t *testing.T, mode auth.Mode) *api {
 	cloudv1connect.RegisterClusterServiceHandler(server, a.handlers)
 	cloudv1connect.RegisterAdminServiceHandler(server, adminHandlers{observed: a.handlers})
 	cloudv1connect.RegisterTenantServiceHandler(server, tenantHandlers{observed: a.handlers})
-	cloudv1connect.RegisterSubTenantServiceHandler(server, subTenantHandlers{observed: a.handlers})
 	mux := http.NewServeMux()
 	connecthttp.Mount(mux, server)
 	srv := httptest.NewServer(mux)
@@ -121,8 +119,7 @@ func newAPI(t *testing.T, mode auth.Mode) *api {
 	a.url = srv.URL
 	client := connect.NewClient(connecthttp.NewTransport(srv.Client(), srv.URL))
 	a.clients = clients{cluster: cloudv1connect.NewClusterServiceClient(client),
-		admin: cloudv1connect.NewAdminServiceClient(client), tenant: cloudv1connect.NewTenantServiceClient(client),
-		subtenant: cloudv1connect.NewSubTenantServiceClient(client)}
+		admin: cloudv1connect.NewAdminServiceClient(client), tenant: cloudv1connect.NewTenantServiceClient(client)}
 	return a
 }
 

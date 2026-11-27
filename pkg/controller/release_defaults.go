@@ -18,7 +18,6 @@ import (
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
 	"github.com/yindia/cluster-vending/pkg/buildserial"
 	"github.com/yindia/cluster-vending/pkg/catalog"
-	"github.com/yindia/cluster-vending/pkg/component"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
 )
 
@@ -86,11 +85,8 @@ func defaultContent() cloudv1alpha1.ReleaseContent {
 
 // ContentOf is a release file as the content of a Release: each minor
 // pins every component at its version, sorted by name, with the minor's
-// own values for the components that have any. The NamespaceTenancy
-// definition (Capsule) also locks this build's shared bootstrap into its NEW pin; published Release objects are never read
-// through this composition path.
+// own values for the components that have any.
 func ContentOf(rel catalog.Release) cloudv1alpha1.ReleaseContent {
-	tenancy := catalog.ShippedRoleName(component.RoleNamespaceTenancy)
 	content := cloudv1alpha1.ReleaseContent{RenderVersion: crossplaneaws.RenderVersion,
 		Kubernetes: make([]cloudv1alpha1.KubernetesRelease, 0, len(rel.Kubernetes))}
 	for _, k := range rel.Kubernetes {
@@ -99,16 +95,7 @@ func ContentOf(rel catalog.Release) cloudv1alpha1.ReleaseContent {
 			EndOfSupport: metav1.NewTime(end), NodeAMIPin: k.NodeAMIPin}
 		for _, name := range rel.ComponentNames() {
 			pin := cloudv1alpha1.ComponentPin{Name: name, Version: rel.VersionOn(k, name)}
-			values, ok := k.Values[name]
-			if name == tenancy {
-				var err error
-				values, err = catalog.CapsuleBootstrapValues(values)
-				if err != nil {
-					panic(err) // invalid embedded bootstrap is a broken build
-				}
-				ok = true
-			}
-			if ok {
+			if values, ok := k.Values[name]; ok {
 				raw, _ := json.Marshal(values) // YAML maps of the file: always JSON
 				pin.Values = &runtime.RawExtension{Raw: raw}
 			}

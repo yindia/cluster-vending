@@ -781,7 +781,13 @@ field (`replicas`, `poll`, `maxReconcileRate`, `resources.requests|limits.cpu|me
 | `provider-aws-ec2` | 30 m | 10/s | 500m, 1Gi | 2, 2Gi |
 | `provider-aws-eks` | 10 m | 10/s | 500m, 1Gi | 2, 2Gi |
 | kms, sqs, cloudwatchevents, cloudwatchlogs, s3 | 10 m | 10/s | 50m, 256Mi | 500m, 768Mi |
-| `provider-helm` | 10 m | 50/s | 100m, 256Mi | 1, 1Gi |
+| `provider-helm` | 30 s | 100/s | 100m, 256Mi | 1, 1Gi |
+
+provider-helm polls every 30 s because its poll is what brings a Release's
+status (a failed install, drift in the workload cluster) to the platform,
+which watches Releases: a status shows within about 30 s. On 100 clusters
+that is ~43 remote Helm status calls a second, so its rate is 100/s to leave
+room for the burst of a fleet-wide release move.
 
 One replica each, with leader election on, so `replicas: 2` gives a hot
 standby. Why: a provider that restarts loses nothing (it observes every

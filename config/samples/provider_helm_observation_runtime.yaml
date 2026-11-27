@@ -6,11 +6,10 @@
 # arguments and identity settings. After creating, explicitly point
 # Provider/provider-helm runtimeConfigRef here.
 #
-# The poll only catches drift: spec changes reach provider-helm through its
-# watch at once, and the platform judges a rollout itself (Releases render
-# wait: false; docs/architecture.md#helm-operations). Earlier versions of this
-# sample used --poll=15s; move an applied copy to 10m (each poll is a remote
-# Helm status call per Release).
+# Spec changes reach provider-helm through its watch at once; the poll is how
+# soon a Release's status (a failed install, drift) reaches the platform
+# (Releases render wait: false; docs/architecture.md#helm-operations). Each
+# poll is a remote Helm status call per Release.
 apiVersion: pkg.crossplane.io/v1beta1
 kind: DeploymentRuntimeConfig
 metadata:
@@ -25,4 +24,4 @@ spec:
         spec:
           containers:
             - name: package-runtime
-              args: ["--poll=10m", "--max-reconcile-rate=50"]
+              args: ["--poll=30s", "--max-reconcile-rate=100"]

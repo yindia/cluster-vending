@@ -136,8 +136,8 @@ providers:
         limits: {cpu: 500m, memory: 768Mi}
     # Reads workload clusters only; spec changes reach it through its watch.
     provider-helm:
-      poll: 10m
-      maxReconcileRate: 50
+      poll: 30s
+      maxReconcileRate: 100
       resources:
         requests: {cpu: 100m, memory: 256Mi}
         limits: {cpu: "1", memory: 1Gi}

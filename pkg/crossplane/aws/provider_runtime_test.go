@@ -45,7 +45,7 @@ func TestEveryProviderHasItsOwnRuntimeConfig(t *testing.T) {
 }
 
 // The defaults: one replica each, the AWS providers at 10 reconciles a
-// second and provider-helm at 50, EC2 polling every 30m, requests by size.
+// second and provider-helm at 100 (polling every 30s), EC2 polling every 30m, requests by size.
 func TestProviderRuntimeDefaults(t *testing.T) {
 	configs, err := crossplaneaws.RuntimeConfigs(crossplaneaws.DefaultProviderRuntime())
 	if err != nil {
@@ -64,7 +64,7 @@ func TestProviderRuntimeDefaults(t *testing.T) {
 		"cluster-vending-aws-cloudwatchevents": {[]string{"--poll=10m0s", "--max-reconcile-rate=10"}, "50m", "256Mi", "500m", "768Mi"},
 		"cluster-vending-aws-cloudwatchlogs":   {[]string{"--poll=10m0s", "--max-reconcile-rate=10"}, "50m", "256Mi", "500m", "768Mi"},
 		"cluster-vending-aws-s3":               {[]string{"--poll=10m0s", "--max-reconcile-rate=10"}, "50m", "256Mi", "500m", "768Mi"},
-		"cluster-vending-helm":                 {[]string{"--poll=10m0s", "--max-reconcile-rate=50"}, "100m", "256Mi", "1", "1Gi"},
+		"cluster-vending-helm":                 {[]string{"--poll=30s", "--max-reconcile-rate=100"}, "100m", "256Mi", "1", "1Gi"},
 	}
 	for _, rc := range configs {
 		w, ok := want[rc.Name]
@@ -101,7 +101,7 @@ func TestProviderRuntimeOverrides(t *testing.T) {
 		{"provider-aws-eks", crossplaneaws.ProviderTuning{Replicas: 2, Poll: 5 * time.Minute, MaxReconcileRate: 10, CPURequest: "1", MemoryRequest: "1Gi", CPULimit: "2", MemoryLimit: "3Gi"}},
 		{"provider-aws-iam", crossplaneaws.ProviderTuning{Replicas: 2, Poll: 10 * time.Minute, MaxReconcileRate: 20, CPURequest: "200m", MemoryRequest: "512Mi", CPULimit: "1", MemoryLimit: "3Gi"}},
 		{"provider-aws-kms", crossplaneaws.ProviderTuning{Replicas: 2, Poll: 10 * time.Minute, MaxReconcileRate: 10, CPURequest: "50m", MemoryRequest: "256Mi", CPULimit: "500m", MemoryLimit: "3Gi"}},
-		{crossplane.HelmProviderName, crossplaneaws.ProviderTuning{Replicas: 2, Poll: crossplaneaws.DefaultHelmPoll, MaxReconcileRate: 50, CPURequest: "100m", MemoryRequest: "256Mi", CPULimit: "1", MemoryLimit: "3Gi"}},
+		{crossplane.HelmProviderName, crossplaneaws.ProviderTuning{Replicas: 2, Poll: crossplaneaws.DefaultHelmPoll, MaxReconcileRate: 100, CPURequest: "100m", MemoryRequest: "256Mi", CPULimit: "1", MemoryLimit: "3Gi"}},
 	} {
 		if got := rt.For(tc.provider); got != tc.want {
 			t.Errorf("%s = %+v, want %+v", tc.provider, got, tc.want)

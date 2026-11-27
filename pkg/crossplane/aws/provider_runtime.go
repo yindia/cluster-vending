@@ -142,19 +142,18 @@ const (
 	// observation bound) is derived from it.
 	DefaultEC2Poll = 30 * time.Minute
 	// DefaultHelmPoll is how often provider-helm looks at each Release
-	// unasked: only to catch drift in a workload cluster. A spec change
-	// (a new digest, a retry's annotation, a pause lifted) is reconciled
-	// at once through provider-helm's watch, and the platform judges a
-	// rollout itself (wait: false; the controller reads the workloads),
-	// so nothing waits for this poll. Each poll is a remote Helm status
-	// call: at 15s, ~13 Releases on 100 clusters made ~85 a second.
-	DefaultHelmPoll = 10 * time.Minute
+	// unasked. A spec change (a new digest, a retry's annotation, a pause
+	// lifted) is reconciled at once through provider-helm's watch; the
+	// poll is what brings a Release's status (a failed install, drift in
+	// the workload cluster) to the platform, which watches Releases, so a
+	// status shows within about this long. Each poll is a remote Helm
+	// status call: at 30s, ~13 Releases on 100 clusters make ~43 a second.
+	DefaultHelmPoll = 30 * time.Second
 	// defaultHelmMaxReconcileRate caps provider-helm's reconciles a second.
-	// Kept at 50: it bounds bursts (a fleet-wide release move rewrites
-	// ~1300 Releases, done in about 25s), and with wait: false a reconcile
-	// takes seconds, not minutes, so the cap no longer ties up workers. The
-	// steady load is set by the poll, not by this cap.
-	defaultHelmMaxReconcileRate = 50
+	// 100: the poll takes ~43 a second on 100 clusters, which leaves room
+	// for bursts (a fleet-wide release move rewrites ~1300 Releases, done in
+	// about 25s). With wait: false a reconcile takes seconds, not minutes.
+	defaultHelmMaxReconcileRate = 100
 )
 
 // DefaultProviderRuntime is the providers' runtime for ~100 clusters of

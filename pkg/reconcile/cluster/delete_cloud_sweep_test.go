@@ -121,6 +121,14 @@ func (f *fakeAccount) DeleteSecurityGroup(context.Context, *ec2.DeleteSecurityGr
 	return &ec2.DeleteSecurityGroupOutput{}, nil
 }
 
+func (f *fakeAccount) RevokeSecurityGroupIngress(context.Context, *ec2.RevokeSecurityGroupIngressInput, ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error) {
+	return &ec2.RevokeSecurityGroupIngressOutput{}, nil
+}
+
+func (f *fakeAccount) RevokeSecurityGroupEgress(context.Context, *ec2.RevokeSecurityGroupEgressInput, ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error) {
+	return &ec2.RevokeSecurityGroupEgressOutput{}, nil
+}
+
 // withSweep is a deletion whose account has two Karpenter instances of the
 // cluster and one of another cluster.
 func withSweep(t *testing.T) (*delOrder, *fakeAccount) {

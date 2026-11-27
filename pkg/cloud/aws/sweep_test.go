@@ -26,8 +26,11 @@ type sweepWorld struct {
 	// sgBusy: security groups AWS refuses to delete (DependencyViolation)
 	// this many times.
 	sgBusy map[string]int
-	fail   map[string]error // by call name
-	ops    []string
+	// refs: security group -> the groups its rules name, ingress or
+	// egress. AWS refuses to delete a group another group's rule names.
+	refs map[string][]sgRef
+	fail map[string]error // by call name
+	ops  []string
 }
 
 func newSweepWorld() *sweepWorld {
@@ -55,6 +58,7 @@ func newSweepWorld() *sweepWorld {
 		},
 		sgs:    map[string]map[string]string{"sg-ours": {TagLoadBalancerCluster: "prod"}, "sg-other": {TagLoadBalancerCluster: "staging"}},
 		sgBusy: map[string]int{},
+		refs:   map[string][]sgRef{},
 		fail:   map[string]error{},
 	}
 }
@@ -154,6 +158,9 @@ func (w *sweepWorld) DeleteLaunchTemplate(_ context.Context, in *ec2.DeleteLaunc
 }
 
 func (w *sweepWorld) DescribeSecurityGroups(_ context.Context, in *ec2.DescribeSecurityGroupsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error) {
+	if out, ok := w.referencing(in.Filters); ok {
+		return out, nil
+	}
 	out := &ec2.DescribeSecurityGroupsOutput{}
 	for _, id := range sortedKeys(w.sgs) {
 		if matches(w.sgs[id], "", in.Filters) {
@@ -165,6 +172,9 @@ func (w *sweepWorld) DescribeSecurityGroups(_ context.Context, in *ec2.DescribeS
 
 func (w *sweepWorld) DeleteSecurityGroup(_ context.Context, in *ec2.DeleteSecurityGroupInput, _ ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error) {
 	id := *in.GroupId
+	if w.referenced(id) {
+		return nil, apiErr("DependencyViolation", "resource "+id+" has a dependent object")
+	}
 	if w.sgBusy[id] > 0 {
 		w.sgBusy[id]--
 		return nil, apiErr("DependencyViolation", "resource sg has a dependent object")

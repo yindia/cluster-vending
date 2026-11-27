@@ -46,6 +46,8 @@ type SweepEC2API interface {
 	DeleteLaunchTemplate(context.Context, *ec2.DeleteLaunchTemplateInput, ...func(*ec2.Options)) (*ec2.DeleteLaunchTemplateOutput, error)
 	DescribeSecurityGroups(context.Context, *ec2.DescribeSecurityGroupsInput, ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
 	DeleteSecurityGroup(context.Context, *ec2.DeleteSecurityGroupInput, ...func(*ec2.Options)) (*ec2.DeleteSecurityGroupOutput, error)
+	RevokeSecurityGroupIngress(context.Context, *ec2.RevokeSecurityGroupIngressInput, ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupIngressOutput, error)
+	RevokeSecurityGroupEgress(context.Context, *ec2.RevokeSecurityGroupEgressInput, ...func(*ec2.Options)) (*ec2.RevokeSecurityGroupEgressOutput, error)
 }
 
 // SweepELBAPI is the part of the ELBv2 client the sweep uses.
@@ -335,8 +337,14 @@ func sweepSecurityGroups(ctx context.Context, api SweepEC2API, cluster string, r
 			case isCode(err, "InvalidGroup.NotFound"):
 			case isCode(err, "DependencyViolation"):
 				// The load balancer's network interfaces go some minutes
-				// after it: next pass.
+				// after it: next pass. A rule in another group naming this
+				// one (the controller adds them to the EKS cluster's group,
+				// which goes only with the cluster) never goes by itself:
+				// remove those rules, then delete on the next pass.
 				r.SecurityGroups = append(r.SecurityGroups, id)
+				if err := dropReferences(ctx, api, id); err != nil {
+					errs = append(errs, err)
+				}
 			default:
 				r.SecurityGroups = append(r.SecurityGroups, id)
 				errs = append(errs, fmt.Errorf("delete security group %s: %w", id, err))
@@ -348,6 +356,66 @@ func sweepSecurityGroups(ctx context.Context, api SweepEC2API, cluster string, r
 		in.NextToken = out.NextToken
 	}
 	return errors.Join(errs...)
+}
+
+// dropReferences removes, from every security group, the ingress and
+// egress rules that name group id. Only the part of a rule naming id goes;
+// such a rule names a group being deleted, so it allows nothing afterwards.
+func dropReferences(ctx context.Context, api SweepEC2API, id string) error {
+	for _, egress := range []bool{false, true} {
+		filter := "ip-permission.group-id"
+		if egress {
+			filter = "egress.ip-permission.group-id"
+		}
+		in := &ec2.DescribeSecurityGroupsInput{Filters: []ec2types.Filter{{Name: awssdk.String(filter), Values: []string{id}}}}
+		out, err := api.DescribeSecurityGroups(ctx, in)
+		if err != nil {
+			return fmt.Errorf("list the security groups whose rules name %s: %w", id, err)
+		}
+		for _, g := range out.SecurityGroups {
+			perms := g.IpPermissions
+			if egress {
+				perms = g.IpPermissionsEgress
+			}
+			if err := revokeNaming(ctx, api, awssdk.ToString(g.GroupId), naming(perms, id), egress); err != nil {
+				return fmt.Errorf("remove the rules of %s that name %s: %w", awssdk.ToString(g.GroupId), id, err)
+			}
+		}
+	}
+	return nil
+}
+
+// naming is the part of perms that names group id.
+func naming(perms []ec2types.IpPermission, id string) []ec2types.IpPermission {
+	var out []ec2types.IpPermission
+	for _, p := range perms {
+		var pairs []ec2types.UserIdGroupPair
+		for _, pair := range p.UserIdGroupPairs {
+			if awssdk.ToString(pair.GroupId) == id {
+				pairs = append(pairs, ec2types.UserIdGroupPair{GroupId: pair.GroupId, UserId: pair.UserId})
+			}
+		}
+		if len(pairs) > 0 {
+			out = append(out, ec2types.IpPermission{IpProtocol: p.IpProtocol, FromPort: p.FromPort, ToPort: p.ToPort, UserIdGroupPairs: pairs})
+		}
+	}
+	return out
+}
+
+func revokeNaming(ctx context.Context, api SweepEC2API, group string, perms []ec2types.IpPermission, egress bool) error {
+	if len(perms) == 0 {
+		return nil
+	}
+	var err error
+	if egress {
+		_, err = api.RevokeSecurityGroupEgress(ctx, &ec2.RevokeSecurityGroupEgressInput{GroupId: &group, IpPermissions: perms})
+	} else {
+		_, err = api.RevokeSecurityGroupIngress(ctx, &ec2.RevokeSecurityGroupIngressInput{GroupId: &group, IpPermissions: perms})
+	}
+	if isCode(err, "InvalidPermission.NotFound") || isCode(err, "InvalidGroup.NotFound") {
+		return nil
+	}
+	return err
 }
 
 func ec2Tags(tags []ec2types.Tag) map[string]string {

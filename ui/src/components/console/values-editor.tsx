@@ -14,6 +14,8 @@ export interface ValuesEditorProps {
   value: string; label: string; language?: "yaml" | "json";
   readOnly?: boolean; disabled?: boolean; onChange?: (value: string) => void;
   error?: string; description?: string; height?: string; placeholder?: string;
+  /** The 1-based line `error` points at: marked in the editor and scrolled into view. */
+  errorLine?: number;
   ref?: Ref<ValuesEditorHandle>;
 }
 

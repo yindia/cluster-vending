@@ -1,47 +1,15 @@
 import { create } from "@bufbuild/protobuf";
 import type { BrowserClients } from "../api/client";
 import {
-  BootstrapTenantRequestSchema,
   CloudAccountState,
   GetAccountOnboardingRequestSchema,
-  type AwsAccount,
   type CloudAccount,
 } from "../../gen/cloud/v1/tenant_service_pb";
-import { requireSupportedProvider } from "../providers/registry";
 import { collectPages } from "../api/pagination";
-
-/** Local form state; provider payloads always use generated schemas. */
-export type AccountBootstrapFields = Pick<CloudAccount, "accountName"> &
-  Pick<AwsAccount, "accountId" | "role"> & { provider: string };
 
 export const ACCOUNT_PAGE_SIZE = 10;
 export const ACCOUNT_POLL_MS = 5_000;
 export const ACCOUNT_POLL_WINDOW_MS = 120_000;
-
-export function accountBootstrapFields(account?: CloudAccount): AccountBootstrapFields {
-  return {
-    provider: account ? account.provider.case ?? "" : "aws",
-    accountName: account?.accountName ?? "",
-    accountId: account?.provider.case === "aws" ? account.provider.value.accountId : "",
-    role: account?.provider.case === "aws" ? account.provider.value.role : "cluster-vending-provisioner",
-  };
-}
-
-export function validateAccount(fields: AccountBootstrapFields) {
-  const errors: Partial<Record<keyof AccountBootstrapFields, string>> = {};
-  if (fields.provider !== "aws") errors.provider = "Only AWS accounts are supported.";
-  if (Array.from(fields.accountName.trim()).length > 128) errors.accountName = "Use at most 128 characters.";
-  if (!/^\d{12}$/.test(fields.accountId.trim())) errors.accountId = "Enter a 12-digit AWS account ID.";
-  if (!/^[\w+=,.@-]{1,64}$/.test(fields.role.trim())) errors.role = "Enter an IAM role name without a path (1–64 letters, digits, or _+=,.@-).";
-  return errors;
-}
-
-export function accountStepErrors(fields: AccountBootstrapFields, step: number) {
-  const errors = validateAccount(fields);
-  if (step === 0) return { ...(errors.provider ? { provider: errors.provider } : {}), ...(errors.accountName ? { accountName: errors.accountName } : {}) };
-  if (step === 1) return { ...(errors.accountId ? { accountId: errors.accountId } : {}), ...(errors.role ? { role: errors.role } : {}) };
-  return errors;
-}
 
 /** Join through immutable IDs, after exhausting both tenant-scoped lists. */
 export async function loadAccountRelations(api: BrowserClients, tenantId: string, id: string, signal: AbortSignal) {
@@ -60,20 +28,6 @@ export async function loadAccountRelations(api: BrowserClients, tenantId: string
   const networkIds = new Set(networks.map((network) => network.id));
   const clusters = allClusters.filter((cluster) => !!cluster.spec?.network && networkIds.has(cluster.spec.network.networkId));
   return { networks, clusters };
-}
-
-export function bootstrapAccountRequest(tenantId: string, fields: AccountBootstrapFields) {
-  requireTenant(tenantId);
-  requireSupportedProvider(fields.provider);
-  const errors = validateAccount(fields);
-  if (Object.keys(errors).length) throw new Error(Object.values(errors).join(" "));
-  return create(BootstrapTenantRequestSchema, {
-    tenantId,
-    account: {
-      accountName: fields.accountName.trim(),
-      provider: { case: "aws", value: { accountId: fields.accountId.trim(), role: fields.role.trim() } },
-    },
-  });
 }
 
 function requireTenant(tenantId: string) {
@@ -111,14 +65,6 @@ export function accountPage(accounts: readonly CloudAccount[], requestedPage: nu
   const totalPages = Math.max(1, Math.ceil(accounts.length / ACCOUNT_PAGE_SIZE));
   const page = Math.min(totalPages, Math.max(1, Math.floor(requestedPage) || 1));
   return { page, accounts: accounts.slice((page - 1) * ACCOUNT_PAGE_SIZE, page * ACCOUNT_PAGE_SIZE) };
-}
-
-export async function bootstrapAccount(api: BrowserClients, tenantId: string, fields: AccountBootstrapFields, signal?: AbortSignal) {
-  signal?.throwIfAborted();
-  const response = await api.tenant.bootstrapTenant(bootstrapAccountRequest(tenantId, fields), { signal });
-  signal?.throwIfAborted();
-  if (!response.account?.id) throw new Error("The bootstrap response did not include an account ID. Refresh the list before retrying.");
-  return response.account;
 }
 
 export async function verifyAccount(api: BrowserClients, tenantId: string, id: string, regions: string, signal?: AbortSignal) {

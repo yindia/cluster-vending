@@ -7,7 +7,8 @@ import { ImportClusterRequestSchema } from "../../gen/cloud/v1/cluster_service_p
 import { NetworkSchema } from "../../gen/cloud/v1/network_pb";
 import { CloudAccountSchema } from "../../gen/cloud/v1/tenant_service_pb";
 import type { BrowserClients } from "../api/client";
-import { parseImportManifest, importManifestTemplate, reviewImportManifest, applyImportManifest } from "./import-manifests";
+import { parseImportManifest, reviewImportManifest, applyImportManifest } from "./import-manifests";
+import { manifestTemplate, PLACEHOLDER_ID } from "./manifest-templates";
 
 const accountId = "00000000-0000-4000-8000-000000000001";
 const networkId = "00000000-0000-4000-8000-000000000002";
@@ -22,14 +23,14 @@ test("import manifests preserve CLI fields and the reviewed idempotency key", ()
   const parsedCluster = fromJsonString(ImportClusterRequestSchema, parseImportManifest(stringify(cluster), "ClusterImport", "acme", requestId).requestJson);
   assert.equal(parsedCluster.networkId, networkId); assert.equal(parsedCluster.provider.value?.defaultNodeGroupName, "existing-workers");
   for (const kind of ["NetworkImport", "ClusterImport"] as const) {
-    const example = importManifestTemplate(kind, "acme").replace("REPLACE_WITH_ACCOUNT_UUID", accountId).replace("REPLACE_WITH_NETWORK_UUID", networkId);
+    const example = manifestTemplate(kind, "acme").replaceAll(PLACEHOLDER_ID, kind === "NetworkImport" ? accountId : networkId);
     assert.equal(parseImportManifest(example, kind, "acme", requestId).kind, kind);
   }
 });
 
 test("import YAML refuses cross-tenant identities, ownership fields and invalid cloud identifiers", () => {
   const reject = (input: object, pattern: RegExp) => assert.throws(() => parseImportManifest(stringify(input), "NetworkImport", "acme", requestId), pattern);
-  reject({ ...network, kind: "Network" }, /Expected kind/);
+  reject({ ...network, kind: "Network" }, /Use kind: NetworkImport/);
   reject({ ...network, metadata: { ...network.metadata, tenant: "other" } }, /active tenant/);
   reject({ ...network, metadata: { ...network.metadata, id: networkId } }, /Omit metadata.id/);
   reject({ ...network, metadata: { ...network.metadata, labels: { team: "platform" } } }, /labels cannot/);

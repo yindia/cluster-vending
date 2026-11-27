@@ -91,7 +91,6 @@ for (const mode of ["Light", "Dark"] as const) {
         await page.goto("/networks");
         await setAppearance(page, mode);
         await page.getByRole("button", { name: "Import network", exact: true }).click();
-        await page.getByRole("radio", { name: "Paste YAML", exact: true }).click();
         copyLabel = "NetworkImport manifest";
         editor = page.getByRole("textbox", { name: copyLabel, exact: true });
         await editor.fill("apiVersion: cluster-vending.io/v1\nkind: NetworkImport\nmetadata:\n  name: selected-network\nspec:\n  enabled: true\n  count: 2\n");

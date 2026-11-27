@@ -1,15 +1,13 @@
 "use client";
 
 import { SearchFilters } from "./filter-row";
-import { useCallback, useId, useRef, useState, type ReactNode } from "react";
-import { toJsonString } from "@bufbuild/protobuf";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Divider } from "@astryxdesign/core/Divider";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
-import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Grid } from "@astryxdesign/core/Grid";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
@@ -30,31 +28,23 @@ import { VStack } from "@astryxdesign/core/VStack";
 import { usePlatform } from "@/components/platform-provider";
 import { collectPages } from "@/lib/api/pagination";
 import { errorMessage, useAsyncQuery } from "@/lib/api/use-query";
-import {
-  buildImportCluster, clusterIsConverging, createRequestIdentity, type ClusterImportForm,
-} from "@/lib/workflows/clusters";
-import {
-  ClusterState, ClusterRolloutResult, ClusterUpgradePhase, UpgradeMode, type Cluster, type PlatformComponent,
-} from "@/gen/cloud/v1/cluster_pb";
-import { ImportClusterRequestSchema, type ImportClusterRequest } from "@/gen/cloud/v1/cluster_service_pb";
+import { clusterIsConverging } from "@/lib/workflows/clusters";
+import { ClusterState, ClusterRolloutResult, ClusterUpgradePhase, UpgradeMode, type Cluster, type PlatformComponent } from "@/gen/cloud/v1/cluster_pb";
 import { platformInstallationStatus } from "@/lib/workflows/installation-status";
 import { awsAddonInventory } from "@/lib/providers/aws-addons";
 import { ManagedResourceState, type ManagedResource } from "@/gen/cloud/v1/managed_resource_pb";
 import { ConditionStatus } from "@/gen/cloud/v1/conditions_pb";
 import { Disposition, ImportPhase } from "@/gen/cloud/v1/import_pb";
 import { RetryAction } from "@/gen/cloud/v1/cluster_retry_pb";
-import { ResourceWorkflowDialog, ManifestCreateDialog } from "./manifest-create-dialog";
-import { accountDescription } from "@/lib/workflows/cluster-placement";
+import { ManifestCreateDialog } from "./manifest-create-dialog";
+import { ManifestUpdateDialog } from "./manifest-update-dialog";
 import { ClusterAccessButton } from "./cluster-access";
 import { ClusterActions } from "./cluster-takeover";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { ClusterWorkloadSummary } from "./cluster-workload-summary";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
-import { CreateCluster } from "./cluster-create";
-import { EditCluster, clusterAccessStep } from "./cluster-edit";
 import { controlPlaneLogs } from "@/lib/workflows/cluster-summary";
-import { ErrorNotice, NetworkPicker, NetworkPlacement, tierLabel, useClusterNetworks } from "./cluster-network-picker";
 import { ClusterTopology } from "./cluster-topology";
 import { ClusterConfiguration } from "./cluster-configuration";
 import { ClusterNodeGroups } from "./cluster-node-groups";
@@ -65,6 +55,15 @@ import { ClusterDeprecationsPanel } from "./cluster-deprecations";
 import { ClusterRecommendationsPanel } from "./cluster-recommendations";
 import { ClusterViolationsPanel } from "./cluster-violations";
 import { ClusterComponentsPanel } from "./cluster-tenant-components";
+
+function ErrorNotice({ message }: { message: string }) {
+  return message ? <Banner status="error" title="Request failed" description={message} /> : null;
+}
+
+/** A cluster's rollout tier is its network's. */
+function tierLabel(tier?: number) {
+  return tier ? `Tier ${tier - 1} (from network)` : "Network default";
+}
 
 function label(values: Record<number, string>, value?: number) {
   if (value === undefined) return "Not reported";
@@ -183,97 +182,15 @@ function ClusterList() {
       {visible.length ? <Table data={visible.map((cluster) => ({ id: cluster.id, cluster }))} columns={columns} idKey="id" aria-label="Clusters" rowIndexStart={(currentPage - 1) * 25 + 1} rowCount={filtered.length} /> : <Text>{inventory.length ? "No clusters match these filters." : "No clusters found for this tenant."}</Text>}
       {filtered.length > 25 && <Pagination label="Clusters pagination" page={currentPage} onChange={setPage} totalItems={filtered.length} pageSize={25} variant="count" />}
     </VStack>}
-    {creating && <CreateCluster onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); setAcceptedId(id); setAcknowledgement("Create request recorded. Readiness is reported separately in cluster details."); list.refresh(); }} />}
-    {importing && <ImportCluster onClose={() => setImporting(false)} onImported={(id) => { setImporting(false); setAcceptedId(id); setAcknowledgement("Import request recorded. Discovery is asynchronous; cloud resources remain read-only until takeover."); list.refresh(); }} />}
+    {creating && <ManifestCreateDialog kind="Cluster" onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); setAcceptedId(created.id); setAcknowledgement("Create request recorded. Readiness is reported separately in cluster details."); list.refresh(); }} />}
+    {importing && <ManifestCreateDialog kind="ClusterImport" onClose={() => setImporting(false)} onCreated={(imported) => { setImporting(false); setAcceptedId(imported.id); setAcknowledgement("Import request recorded. Discovery is asynchronous; cloud resources remain read-only until takeover."); list.refresh(); }} />}
   </VStack>;
-}
-
-function ImportCluster({ onClose, onImported }: { onClose: () => void; onImported: (id: string) => void }) {
-  const { api, tenantId } = usePlatform();
-  const [form, setForm] = useState<ClusterImportForm>({ name: "", displayName: "", networkId: "", defaultNodeGroupName: "" });
-  const [step, setStep] = useState(0);
-  const [mode, setMode] = useState<"guided" | "yaml">("guided");
-  const [manifestVisited, setManifestVisited] = useState(false);
-  const [manifestBusy, setManifestBusy] = useState(false);
-  const [review, setReview] = useState<ImportClusterRequest>();
-  const [busy, setBusy] = useState(false);
-  const locked = useRef(false);
-  const identity = useRef(createRequestIdentity(() => crypto.randomUUID()));
-  const [error, setError] = useState("");
-  const errorRef = useRef<HTMLElement>(null);
-  const formId = useId();
-  const choices = useClusterNetworks();
-  const network = choices.data?.networks.find((item) => item.id === form.networkId);
-  function change(field: keyof ClusterImportForm, value: string) {
-    identity.current.invalidate(); setReview(undefined); setError(""); setForm((old) => ({ ...old, [field]: value }));
-  }
-  async function submit() {
-    if (locked.current) return;
-    try {
-      if (!network || !choices.data) throw new Error("Choose an existing network.");
-      if (step === 0) {
-        setReview(buildImportCluster(tenantId, form, network, choices.data.accounts, identity.current.get()));
-        setError(""); setStep(1); return;
-      }
-      if (!review) throw new Error("Review the import request first.");
-      locked.current = true; setBusy(true); setError("");
-      const result = await api.cluster.importCluster(review);
-      if (!result.cluster?.id) throw new Error("No imported cluster ID was returned. Retry unchanged inputs with the same request ID.");
-      onImported(result.cluster.id);
-    } catch (cause) { setError(errorMessage(cause)); requestAnimationFrame(() => errorRef.current?.focus()); }
-    finally { locked.current = false; setBusy(false); }
-  }
-  return <ResourceWorkflowDialog title="Import cluster" isOpen
-    onOpenChange={(open) => { if (!open && !locked.current) onClose(); }}
-    method={{ label: "Import method", value: mode, onChange: (next) => { if (next === "yaml") setManifestVisited(true); setMode(next); } }}
-    description={`Register an existing cluster for read-only discovery in tenant ${tenantId}.`}
-    steps={["Existing infrastructure", "Review import"]} step={step} busy={busy || manifestBusy}
-    placement={<NetworkPlacement network={network} choices={choices} />}
-    yamlContent={manifestVisited && <ManifestCreateDialog kind="ClusterImport" embedded isOpen={mode === "yaml"} onBusyChange={setManifestBusy} onOpenChange={open => { if (!open) onClose(); }} onCreated={resource => onImported(resource.id)} />}
-    footer={<HStack gap={3} wrap="wrap">
-      <Button type="button" label="Cancel import" variant="secondary" onClick={onClose} isDisabled={busy} />
-      {step === 1 && <Button type="button" label="Back" variant="secondary" onClick={() => { setStep(0); setError(""); }} isDisabled={busy} />}
-      <Button label={step === 1 ? "Import cluster" : "Review import"} variant="primary" type="submit" form={formId} isLoading={busy} />
-    </HStack>}>
-    <form id={formId} method="post" aria-label="Cluster import settings" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      <VStack gap={5}>
-        {error && <VStack ref={errorRef} tabIndex={-1} role="alert"><ErrorNotice message={error} /></VStack>}
-        {step === 0 && <>
-          <NetworkPicker operation="cluster.import" choices={choices} value={form.networkId} disabled={busy} onChange={(next) => change("networkId", next)} />
-          <Divider />
-          <VStack gap={3}>
-            <Heading level={4}>Resources to discover</Heading>
-            <Text color="secondary">Enter the names as they appear in EKS.</Text>
-            <FormLayout>
-              <TextInput label="Existing cluster name" placeholder="production-eks" value={form.name} onChange={(next) => change("name", next)} isRequired isDisabled={busy} autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
-              <TextInput label="Existing default node group name" placeholder="platform-workers" value={form.defaultNodeGroupName} onChange={(next) => change("defaultNodeGroupName", next)} isRequired isDisabled={busy} description="Only this group is registered as the default pool." autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
-            </FormLayout>
-          </VStack>
-          <TextInput label="Display name" value={form.displayName} onChange={(next) => change("displayName", next)} isOptional isDisabled={busy} />
-        </>}
-        {step === 1 && <>
-          <MetadataList columns="multi">
-            <MetadataListItem label="Cluster name">{form.name}</MetadataListItem>
-            {form.displayName && <MetadataListItem label="Display name">{form.displayName}</MetadataListItem>}
-            <MetadataListItem label="Default node group">{form.defaultNodeGroupName}</MetadataListItem>
-            <MetadataListItem label="Cloud account">{accountDescription(choices.data?.accounts.find((account) => account.id === network?.spec?.bootstrapId))}</MetadataListItem>
-            <MetadataListItem label="Network">{network?.displayName || network?.name}</MetadataListItem>
-            <MetadataListItem label="Region">{network?.spec?.region}</MetadataListItem>
-            <MetadataListItem label="Inherited tier">{tierLabel(network?.spec?.tier)}</MetadataListItem>
-          </MetadataList>
-          <Banner status="info" title="Read-only discovery" description="Track discovery on the cluster detail page. Taking ownership is a separate action after discovery." />
-          <Collapsible trigger="Advanced · exact import request" defaultIsOpen={false}><VStack as="pre" isScrollable><Text type="code">{review && toJsonString(ImportClusterRequestSchema, review, { prettySpaces: 2 })}</Text></VStack></Collapsible>
-        </>}
-      </VStack>
-    </form>
-  </ResourceWorkflowDialog>;
 }
 
 function ClusterDetails({ clusterId }: { clusterId: string }) {
   const { api, tenantId } = usePlatform();
   const [polling, setPolling] = useState(true);
-  // false: closed; otherwise the wizard step the editor opens at.
-  const [editing, setEditing] = useState<number | false>(false);
+  const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [message, setMessage] = useState("");
@@ -344,8 +261,8 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         metadata={<HStack gap={4} wrap="wrap" vAlign="center"><ProviderIcon provider={cluster.spec?.provider.case ?? ""} size="sm" /><CopyValue value={cluster.name} label="cluster name" isSecondary /><CopyValue value={cluster.id} label="cluster ID" isSecondary /></HStack>}
         status={<>{statusValue(ClusterState, status?.state)}{pause && pause.key !== "not-paused" && <StatusValue label={[pause.label, status?.freeze?.scope].filter(Boolean).join(" · ")} tone={pause.tone} />}</>}
         actions={<HStack gap={2} wrap="wrap" vAlign="center">
-          <ClusterAccessButton cluster={cluster} onEditAdministrators={status?.state === ClusterState.DELETING ? undefined : () => { setEditing(clusterAccessStep); setMessage(""); }} />
-          {<Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(0); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} />}
+          <ClusterAccessButton cluster={cluster} onEditAdministrators={status?.state === ClusterState.DELETING ? undefined : () => { setEditing(true); setMessage(""); }} />
+          {<Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(true); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} />}
           {<ClusterActions cluster={cluster} onDelete={() => setDeleting(true)}
             onAccepted={() => { setMessage("Takeover request accepted. Ownership and convergence continue asynchronously."); refresh(); }} />}
         </HStack>}
@@ -485,7 +402,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
       </VStack>}
       {activeTab === "deprecations" && <VStack id={panelId("deprecations")} role="tabpanel" aria-label="Deprecated APIs" tabIndex={0} gap={6}><ClusterDeprecationsPanel clusterId={clusterId} /></VStack>}
       {activeTab === "recommendations" && <VStack id={panelId("recommendations")} role="tabpanel" aria-label="Recommendations" tabIndex={0} gap={6}><ClusterRecommendationsPanel clusterId={clusterId} /></VStack>}
-      {editing !== false && <EditCluster network={network.data?.network} clusterId={clusterId} current={cluster} initialStep={editing} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
+      {editing && <ManifestUpdateDialog kind="Cluster" id={clusterId} currentEtag={cluster.etag} onClose={() => setEditing(false)} onApplied={(applied) => { setEditing(false); setMessage(applied); refresh(); }} />}
       {deleting && <DeleteCluster cluster={cluster} onCancel={() => setDeleting(false)} onDeleted={() => { setDeleting(false); setMessage("Deletion requested. Resources are removed asynchronously."); refresh(); }} />}
       {retrying && <RetryCluster clusterId={clusterId} onClose={() => setRetrying(false)} onRetried={refresh} />}
     </>}

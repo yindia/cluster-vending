@@ -1,4 +1,5 @@
-import { timestampDate, type Timestamp } from "@bufbuild/protobuf/wkt";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import type { BrowserClients } from "../api/client";
 import { ReleaseChannel, UpgradeMode } from "../../gen/cloud/v1/cluster_pb";
 import { AwsSupportType } from "../../gen/cloud/v1/aws_pb";
 import type { ReleaseChannelInfo, ReleaseMinor } from "../../gen/cloud/v1/admin_release_pb";
@@ -17,10 +18,6 @@ export interface KubernetesVersionOption {
   isDefault: boolean;
   endOfSupport?: Timestamp;
 }
-
-export interface ExtendedSupportFields { upgradeMode: string; awsSupportType: string; kubernetesVersion: string }
-
-const channelNames: Partial<Record<ReleaseChannel, string>> = { [ReleaseChannel.ALPHA]: "Alpha", [ReleaseChannel.BETA]: "Beta", [ReleaseChannel.STABLE]: "Stable" };
 
 /** The channel whose release the server reads a spec's minors from: its own, else stable's. */
 export function offerChannel(releaseChannel: string): ReleaseChannel {
@@ -56,36 +53,27 @@ export function findVersionOption(options: readonly KubernetesVersionOption[], v
   return minor ? options.find((item) => item.minor === minor) : undefined;
 }
 
-export function isExtendedVersion(options: readonly KubernetesVersionOption[], version: string): boolean {
-  return !!findVersionOption(options, version)?.extended;
-}
-
-function day(value: Timestamp | undefined) { return value ? timestampDate(value).toISOString().slice(0, 10) : ""; }
-
-/** "1.34 · Stable channel", "1.31 · Extended support". */
-export function versionOptionLabel(option: KubernetesVersionOption): string {
-  const where = option.extended ? "Extended support" : channelNames[option.channel] ? `${channelNames[option.channel]} channel` : "No channel";
-  return `${option.minor} · ${where}${option.isDefault ? " · default" : ""}`;
-}
-
-/** The option's support end, and what extended support asks of the cluster. */
-export function versionOptionDescription(option: KubernetesVersionOption): string {
-  const ends = option.endOfSupport ? `Support ends ${day(option.endOfSupport)} (UTC).` : "Support end not reported.";
-  return option.extended ? `${ends} Manual upgrades and the Extended support policy only.` : ends;
-}
+/** The version settings of a cluster spec that extended support constrains. */
+export interface ExtendedSupportFields { kubernetesVersion: string; upgradeMode: UpgradeMode; supportType: AwsSupportType }
 
 /**
  * What the server refuses on an extended minor (pkg/reconcile/cluster/extended.go): Automatic
- * upgrades, and the Standard support policy. Undefined when the fields are allowed.
+ * upgrades, and the Standard support policy. `running` is the minor a cluster runs when the
+ * spec pins none. Undefined when the fields are allowed.
  */
-export function extendedSupportIssue(form: ExtendedSupportFields, options: readonly KubernetesVersionOption[], running = ""): string | undefined {
-  const version = form.kubernetesVersion || running;
-  const option = findVersionOption(options, version);
+export function extendedSupportIssue(fields: ExtendedSupportFields, options: readonly KubernetesVersionOption[], running = ""): string | undefined {
+  const option = findVersionOption(options, fields.kubernetesVersion || running);
   if (!option?.extended) return undefined;
-  if (Number(form.upgradeMode) === UpgradeMode.AUTOMATIC) return `Kubernetes ${option.minor} is on extended support: it runs with Manual upgrades only. Choose Manual, or a minor on a release channel.`;
-  if (Number(form.awsSupportType) === AwsSupportType.STANDARD) return `Kubernetes ${option.minor} is on extended support: the Standard support policy would have AWS upgrade the control plane by force when standard support ends. Choose Extended or the server default.`;
+  if (fields.upgradeMode === UpgradeMode.AUTOMATIC) return `Kubernetes ${option.minor} is on extended support: it runs with UPGRADE_MODE_MANUAL only. Set spec.upgradeMode: UPGRADE_MODE_MANUAL, or choose a minor on a release channel.`;
+  if (fields.supportType === AwsSupportType.STANDARD) return `Kubernetes ${option.minor} is on extended support: AWS_SUPPORT_TYPE_STANDARD would have AWS upgrade the control plane by force when standard support ends. Set spec.aws.upgradePolicy.supportType: AWS_SUPPORT_TYPE_EXTENDED, or leave it out.`;
   return undefined;
 }
 
-/** The fields an extended minor needs: Manual upgrades and Extended support. */
-export const extendedSupportFields = { upgradeMode: String(UpgradeMode.MANUAL), awsSupportType: String(AwsSupportType.EXTENDED) } as const;
+/** The release's minors for a cluster's channel, as the server reads them (stable when it has none). */
+export async function loadKubernetesOffer(api: BrowserClients, tenantId: string, releaseChannel: ReleaseChannel, signal: AbortSignal): Promise<KubernetesVersionOption[]> {
+  const { channels } = await api.tenant.listReleaseChannels({ tenantId }, { signal });
+  const name = offeredRelease(channels, String(releaseChannel));
+  if (!name) return [];
+  const { release } = await api.tenant.getRelease({ tenantId, name }, { signal });
+  return kubernetesVersionOptions(release?.kubernetes ?? []);
+}

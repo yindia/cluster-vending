@@ -6,8 +6,9 @@ own: no database, no AWS access. The tenant console is at
 [localhost:3000](http://localhost:3000/) when run locally.
 
 The console shows tenants, accounts, networks, clusters, components, releases and
-channels, and tenant freezes. Create and import use guided forms or CLI-compatible
-YAML (`cluster-vending.io/v1` manifests), with a review step before submission.
+channels, and tenant freezes. Accounts, networks and clusters are created, edited and imported
+with YAML only: the same `cluster-vending.io/v1` manifests the CLI takes (see
+[examples](../examples)), with a review step before submission.
 Destructive actions need explicit confirmation. The console reads only what the
 caller's grants allow. The API checks every change again.
 

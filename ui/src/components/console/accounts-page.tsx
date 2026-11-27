@@ -13,7 +13,6 @@ import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList"
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Divider } from "@astryxdesign/core/Divider";
-import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Heading } from "@astryxdesign/core/Heading";
 import { HStack } from "@astryxdesign/core/HStack";
 import { Pagination } from "@astryxdesign/core/Pagination";
@@ -26,7 +25,6 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { VStack } from "@astryxdesign/core/VStack";
 import { usePlatform } from "@/components/platform-provider";
 import { useAsyncQuery, errorMessage } from "@/lib/api/use-query";
-import { providerRegistry } from "@/lib/providers/registry";
 import { ConditionStatus } from "@/gen/cloud/v1/conditions_pb";
 import { ManagedResourceState, type ManagedResource } from "@/gen/cloud/v1/managed_resource_pb";
 import { CloudAccountSchema, CloudAccountState, type AccessResult, type CloudAccount } from "@/gen/cloud/v1/tenant_service_pb";
@@ -34,19 +32,15 @@ import { NetworkState, type Network } from "@/gen/cloud/v1/network_pb";
 import { ClusterState, ClusterTier, ReleaseChannel, type Cluster } from "@/gen/cloud/v1/cluster_pb";
 import { Tier } from "@/gen/cloud/v1/tier_pb";
 import { WizardDialog } from "./wizard-dialog";
-import { ManifestCreateDialog, ResourceWorkflowDialog } from "./manifest-create-dialog";
+import { ManifestCreateDialog } from "./manifest-create-dialog";
+import { ManifestUpdateDialog } from "./manifest-update-dialog";
 import { ConsoleTable as Table } from "./console-table";
 import { DetailHeader, DetailSummary, StatusValue } from "./detail-layout";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
 import { RefreshButton } from "./refresh-button";
 import { ProviderIcon } from "./provider-icons";
-import {
-  ACCOUNT_PAGE_SIZE, ACCOUNT_POLL_MS, ACCOUNT_POLL_WINDOW_MS,
-  accessAttemptKey, accountBootstrapFields, accountPage, accountProgressing, accountStateLabel,
-  accountStepErrors, bootstrapAccount, deleteAccount, loadAccountRelations, onboardingRequest,
-  parseVerifyRegions, validateAccount, verifyAccount, type AccountBootstrapFields,
-} from "@/lib/workflows/accounts";
+import { ACCOUNT_PAGE_SIZE, ACCOUNT_POLL_MS, ACCOUNT_POLL_WINDOW_MS, accessAttemptKey, accountPage, accountProgressing, accountStateLabel, deleteAccount, loadAccountRelations, onboardingRequest, parseVerifyRegions, verifyAccount } from "@/lib/workflows/accounts";
 
 function useAccountPolling(active: boolean, refresh: () => void, revision: number, observeOperation = false) {
   const { liveUpdates } = usePlatform();
@@ -103,85 +97,16 @@ function AccessStatus({ account }: { account: CloudAccount }) {
   return <StatusValue label={label} tone={!access ? "neutral" : access.stale ? "warning" : access.verified ? "success" : "error"} />;
 }
 
-function ConnectAccount({ account, onAccepted }: { account?: CloudAccount; onAccepted: (account: CloudAccount) => void }) {
-  const { api, tenantId } = usePlatform();
-  const id = useId();
-  const form = useRef<HTMLFormElement>(null);
+/** Connect (create) or edit an account with its CloudAccount manifest. */
+function ConnectAccount({ account, onAccepted }: { account?: CloudAccount; onAccepted: (account: CloudAccount | undefined, message: string) => void }) {
+  const { tenantId } = usePlatform();
   const [open, setOpen] = useState(false);
-  const [manifestBusy, setManifestBusy] = useState(false);
-  const [createMode, setCreateMode] = useState<"guided" | "yaml">("guided");
-  const [step, setStep] = useState(0);
-  const [fields, setFields] = useState<AccountBootstrapFields>(() => accountBootstrapFields(account));
-  const [errors, setErrors] = useState<ReturnType<typeof validateAccount>>({});
-  const mutation = useAccountMutation();
-  const disabled = !tenantId || mutation.busy;
-  function change(field: keyof AccountBootstrapFields, value: string) {
-    const next = { ...fields, [field]: value };
-    setFields(next);
-    if (!validateAccount(next)[field]) setErrors((previous) => ({ ...previous, [field]: undefined }));
-  }
-  function submit() {
-    if (disabled) return;
-    const nextErrors = accountStepErrors(fields, step);
-    setErrors(nextErrors);
-    const firstError = Object.keys(nextErrors)[0];
-    if (firstError) {
-      const input = form.current?.elements.namedItem(firstError);
-      if (input instanceof HTMLElement) input.focus();
-      return;
-    }
-    if (step < 2) { setStep(step + 1); return; }
-    void mutation.run((signal) => bootstrapAccount(api, tenantId, fields, signal), (saved) => { setOpen(false); onAccepted(saved); });
-  }
-  const status = (field: keyof AccountBootstrapFields) => errors[field] ? { type: "error" as const, message: errors[field] } : undefined;
+  const mark = <ProviderIcon provider={account?.provider.case ?? "aws"} size="lg" />;
   return <>
-    <Button label={account ? "Edit account" : "Connect account"} variant={account ? "secondary" : "primary"} isDisabled={disabled || !!account && account.provider.case !== "aws"} onClick={() => { setFields(accountBootstrapFields(account)); setCreateMode("guided"); setStep(0); setErrors({}); mutation.clearError(); setOpen(true); }} />
-    {open && <ResourceWorkflowDialog isOpen={open} onOpenChange={setOpen} title={account ? "Edit account" : "Connect cloud account"}
-      description={account ? "Update the display name or IAM role for this connection." : "Connect an existing cloud account to this tenant."}
-      mark={<ProviderIcon provider={fields.provider} size="lg" />}
-      method={account ? undefined : { label: "Connection method", value: createMode, onChange: setCreateMode }}
-      yamlContent={!account && <ManifestCreateDialog kind="CloudAccount" embedded isOpen={createMode === "yaml"} onBusyChange={setManifestBusy}
-        onOpenChange={setOpen} onCreated={(saved: CloudAccount) => { setOpen(false); onAccepted(saved); }} />}
-      steps={["Account identity", "AWS access", "Review connection"]} step={step} busy={mutation.busy || manifestBusy}
-      footer={<HStack gap={2} justify="between" wrap="wrap">
-        <Button label="Cancel" isDisabled={mutation.busy} onClick={() => setOpen(false)} />
-        <HStack gap={2}>
-          {step > 0 && <Button label="Back" isDisabled={mutation.busy} onClick={() => setStep(step - 1)} />}
-          <Button type="submit" form={id} label={step < 2 ? "Next" : account ? "Save account" : "Connect account"} variant="primary" isDisabled={disabled} isLoading={mutation.busy} />
-        </HStack>
-      </HStack>}>
-      <form id={id} ref={form} method="post" aria-label={account ? "Edit account" : "Connect cloud account"} noValidate onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        <VStack gap={5}>
-          {step === 0 && <>
-            <FormLayout>
-              <TextInput id={`${id}-name`} htmlName="accountName" label="Display name" description="Optional. Up to 128 characters." value={fields.accountName} onChange={(value) => change("accountName", value)} status={status("accountName")} isDisabled={disabled} isOptional hasAutoFocus />
-            </FormLayout>
-            <Selector label="Cloud provider" value={fields.provider} onChange={value => change("provider", value)} isDisabled={disabled || !!account}
-              options={Object.values(providerRegistry).map(provider => ({ value: provider.id, label: provider.enabled ? provider.label : `${provider.label} · Planned`, disabled: !provider.enabled }))} />
-          </>}
-          {step === 1 && <>
-            <Text color="secondary">Use the account ID and the IAM role the platform will assume. The standard role works with the onboarding template.</Text>
-            <FormLayout>
-              <TextInput id={`${id}-aws-id`} htmlName="accountId" label="AWS account ID" description="12 digits. This cloud identity cannot be changed when editing." value={fields.accountId} onChange={(value) => change("accountId", value)} isRequired isReadOnly={!!account} isDisabled={disabled} status={status("accountId")} inputMode="numeric" autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} hasAutoFocus />
-              <TextInput id={`${id}-role`} htmlName="role" label="IAM role name" description="Role name only, without an ARN or path." value={fields.role} onChange={(value) => change("role", value)} isRequired isDisabled={disabled} status={status("role")} autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} />
-            </FormLayout>
-            <Collapsible trigger="How role access works" defaultIsOpen={false}><Text>The role must trust the platform’s management role. After connecting, the Access tab provides the CloudFormation template and parameters. Create or update that stack in your own AWS session, then request verification.</Text></Collapsible>
-          </>}
-          {step === 2 && <>
-            <Text color="secondary">Review the account connection before saving.</Text>
-            <VStack gap={4}>
-              <HStack gap={6} wrap="wrap"><Value label="Display name">{fields.accountName.trim() || "Unnamed account"}</Value><Value label="Provider">Amazon Web Services</Value></HStack>
-              <Divider />
-              <HStack gap={6} wrap="wrap"><Value label="AWS account ID">{fields.accountId.trim()}</Value><Value label="Tenant">{tenantId}</Value></HStack>
-              <Value label="IAM role">{fields.role.trim()}</Value>
-              {account && <Value label="Platform account ID">{account.id}</Value>}
-              <Banner status="info" title={account ? "Updates the existing connection" : "Connects an existing AWS account"} description={account ? "Saves the display name and assumed role, then converges the ProviderConfig. Role changes affect access for dependent networks and clusters. Cloud resources are not created by this request." : "Registers the account and creates its platform ProviderConfig. Reusing an AWS account ID updates its existing connection. Access verification runs asynchronously; this does not create an AWS account."} />
-            </VStack>
-          </>}
-          <ErrorNotice error={mutation.error} />
-        </VStack>
-      </form>
-    </ResourceWorkflowDialog>}
+    <Button label={account ? "Edit account" : "Connect account"} variant={account ? "secondary" : "primary"} isDisabled={!tenantId || !!account && account.provider.case !== "aws"} onClick={() => setOpen(true)} />
+    {open && (account
+      ? <ManifestUpdateDialog kind="CloudAccount" id={account.id} mark={mark} onClose={() => setOpen(false)} onApplied={(message) => { setOpen(false); onAccepted(undefined, message); }} />
+      : <ManifestCreateDialog kind="CloudAccount" mark={mark} onClose={() => setOpen(false)} onCreated={(saved) => { setOpen(false); onAccepted(saved, "Account connection accepted. Access will be checked asynchronously."); }} />)}
   </>;
 }
 
@@ -342,7 +267,7 @@ function AccountDetails({ id }: { id: string }) {
       metadata={<><HStack gap={2} vAlign="center"><ProviderIcon provider={account?.provider.case ?? ""} size="sm" /><Text color="secondary">{account?.provider.case === "aws" ? "Amazon Web Services" : "Cloud account"}</Text></HStack>{awsId && <CopyValue value={awsId} label="AWS account ID" isSecondary />}{account && <CopyValue value={account.id} label="Platform account ID" isSecondary />}</>}
       status={account && <AccessStatus account={account} />}
       actions={<>
-        {account && <ConnectAccount account={account} onAccepted={(saved) => accepted(saved, "Account update accepted. Access will be checked asynchronously.")} />}
+        {account && <ConnectAccount account={account} onAccepted={(saved, message) => accepted(saved ?? account, message)} />}
         {account && <DeleteAccount account={account} onAccepted={() => { setDeletionRequested(true); setNotice("Deletion requested. The controller must remove the ProviderConfig and account record. Return to accounts to observe completion."); }} />}
         {!account && detail.error && <RefreshButton label="Retry account details" onClick={refresh} />}
       </>} />
@@ -461,7 +386,7 @@ function AccountsList() {
   ];
   return <VStack gap={5}>
     <DetailHeader title="Accounts" description="Connect cloud accounts and verify platform access." actions={<>
-      <ConnectAccount onAccepted={(account) => { setSaved(account); refresh(); }} />
+      <ConnectAccount onAccepted={(account) => { if (account) setSaved(account); refresh(); }} />
       <RefreshButton label="Refresh accounts" isDisabled={!tenantId} isLoading={list.refreshing} onClick={refresh} />
     </>} />
     {!tenantId && <Banner status="warning" title="Select a tenant to manage accounts" />}

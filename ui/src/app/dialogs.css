@@ -8,15 +8,15 @@ dialog::backdrop {
   overscroll-behavior: contain;
 }
 
-/* A single scroll region keeps the current step and its actions in the same modal. */
+/* The manifest workflow: guidance on the rail, the editor or review in one scroll region,
+   and its actions always in view. */
 dialog [data-resource-workflow] {
   display: grid;
   grid-template:
     "header header" auto
-    "method body" auto
     "rail   body" minmax(0, 1fr)
-    "footer footer" auto / 16.75rem minmax(0, 1fr);
-  block-size: min(44rem, 92dvh);
+    "footer footer" auto / 18rem minmax(0, 1fr);
+  block-size: min(46rem, 92dvh);
   min-inline-size: 0;
 }
 
@@ -31,19 +31,26 @@ dialog [data-resource-workflow] {
   border-radius: var(--radius-container);
 }
 
-[data-workflow-method], [data-workflow-rail] {
+dialog [data-workflow-rail] {
+  grid-area: rail;
   padding: var(--spacing-5);
   background: var(--color-background-muted);
   border-inline-end: var(--border-width) solid var(--color-border);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
-[data-workflow-method] { grid-area: method; }
-[data-workflow-rail] {
-  grid-area: rail;
-  padding-block-start: 0;
-  overflow: auto;
+/* Each reference reads as one row; a hover lifts the one being copied. */
+[data-manifest-reference] {
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-container);
+  border: var(--border-width) solid transparent;
+  transition: background-color var(--duration-fast, 150ms) ease-out, border-color var(--duration-fast, 150ms) ease-out;
 }
-[data-resource-workflow="guided-only"] [data-workflow-rail] { padding-block-start: var(--spacing-5); }
+[data-manifest-reference]:is(:hover, :focus-within) {
+  background: var(--color-background-surface);
+  border-color: var(--color-border);
+}
 
 dialog [data-workflow-body] {
   grid-area: body;
@@ -57,55 +64,6 @@ dialog [data-workflow-body] {
 
 [data-workflow-body] > * { flex-shrink: 0; }
 
-[data-workflow-body] [data-advanced-options] {
-  gap: 0;
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-container);
-  padding-inline: var(--spacing-4);
-}
-[data-workflow-body] [data-advanced-options] [data-extra-fields] { display: contents; }
-[data-advanced-options] > *, [data-advanced-options] [data-extra-fields] > * {
-  padding-block: var(--spacing-3);
-}
-[data-advanced-options] [data-extra-fields] > * { border-block-start: var(--border-width) solid var(--color-border); }
-
-[data-row-editor] {
-  container-type: inline-size;
-  inline-size: 100%;
-  min-inline-size: 0;
-}
-[data-row-editor] :is([data-entry-row], [data-entry-head]) {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) var(--size-element-md);
-  align-items: start;
-  gap: var(--spacing-2);
-  inline-size: 100%;
-}
-[data-row-editor="with-choice"] :is([data-entry-row], [data-entry-head]) {
-  grid-template-columns: minmax(0, 1fr) minmax(0, .85fr) minmax(9.5rem, 1fr) var(--size-element-md);
-}
-[data-row-editor] [data-entry-intro] { flex: 1 1 10rem; }
-[data-row-editor] [data-entry-cell] { min-inline-size: 0; }
-[data-row-editor] [data-entry-caption] { display: none; }
-[data-entry-review] { min-inline-size: 0; overflow-wrap: anywhere; white-space: normal; }
-
-@container (max-width: 31rem) {
-  [data-row-editor] [data-entry-head] { display: none; }
-  [data-row-editor] [data-entry-row] {
-    grid-template-columns: minmax(0, 1fr) var(--size-element-md);
-    grid-template-areas: "key remove" "value value";
-    padding: var(--spacing-3);
-    border: var(--border-width) solid var(--color-border);
-    border-radius: var(--radius-container);
-  }
-  [data-row-editor="with-choice"] [data-entry-row] { grid-template-areas: "key remove" "value value" "choice choice"; }
-  [data-entry-cell="key"] { grid-area: key; }
-  [data-entry-cell="value"] { grid-area: value; }
-  [data-entry-cell="choice"] { grid-area: choice; }
-  [data-entry-remove] { grid-area: remove; align-self: end; }
-  [data-row-editor] [data-entry-caption] { display: block; }
-}
-
 [data-workflow-footer] {
   grid-area: footer;
   border-block-start: var(--border-width) solid var(--color-border);
@@ -114,22 +72,23 @@ dialog [data-workflow-body] {
 
 [data-workflow-footer] > * { inline-size: 100%; justify-content: flex-end; }
 [data-workflow-footer] > * > :first-child { margin-inline-end: auto; }
-dialog [data-placement-inline] { display: none; }
 
-@media (max-width: 48rem) {
-  dialog [data-resource-workflow] {
-    grid-template: "header" auto "method" auto "body" minmax(0, 1fr) "footer" auto / minmax(0, 1fr);
-  }
-  dialog [data-workflow-rail], [data-workflow-method] > :first-child { display: none; }
-  dialog [data-workflow-method] {
-    border-inline-end: 0;
-    border-block-end: var(--border-width) solid var(--color-border);
-    padding: var(--spacing-2) var(--spacing-4);
-  }
-  dialog [data-workflow-header], dialog [data-workflow-body], dialog [data-workflow-footer] { padding: var(--spacing-4); }
-  dialog [data-placement-inline] { display: flex; }
+@media (prefers-reduced-motion: reduce) {
+  [data-manifest-reference] { transition: none; }
 }
 
-@media (max-width: 32rem) {
-  [data-workflow-body] [data-workflow-fields] { display: flex; flex-direction: column; }
+/* Narrow screens: one column; the guidance follows the editor and the dialog scrolls as a whole. */
+@media (max-width: 48rem) {
+  dialog [data-resource-workflow] {
+    grid-template: "header" auto "body" auto "rail" auto "footer" auto / minmax(0, 1fr);
+    block-size: auto;
+  }
+  dialog [data-workflow-body], dialog [data-workflow-rail] { overflow: visible; }
+  dialog [data-workflow-rail] {
+    border-inline-end: 0;
+    border-block-start: var(--border-width) solid var(--color-border);
+  }
+  dialog [data-workflow-rail] > :first-child { display: none; }
+  [data-workflow-footer] { position: sticky; inset-block-end: 0; background: var(--color-background-surface); }
+  dialog [data-workflow-header], dialog [data-workflow-body], dialog [data-workflow-rail], dialog [data-workflow-footer] { padding: var(--spacing-4); }
 }

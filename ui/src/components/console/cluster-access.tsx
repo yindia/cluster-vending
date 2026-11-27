@@ -16,7 +16,7 @@ import { CopyButton } from "./copy-value";
 import { ProviderIcon, KubernetesIcon } from "./provider-icons";
 import { RefreshButton } from "./refresh-button";
 
-/** `onEditAdministrators` opens the cluster editor at its access step, offered when the cluster has no administrators. */
+/** `onEditAdministrators` opens the cluster's manifest editor, offered when the cluster has no administrators. */
 export function ClusterAccessButton({ cluster, onEditAdministrators }: { cluster: Cluster; onEditAdministrators?: () => void }) {
   const { tenantId, scopeKey, identity } = usePlatform();
   return <ClusterAccess key={`${scopeKey}:${cluster.id}`} cluster={cluster} tenantId={tenantId} signedIn={!!identity} onEditAdministrators={onEditAdministrators} />;
@@ -63,7 +63,7 @@ function ClusterAccessDialog({ clusterId, tenantId, name, onOpenChange, onEditAd
         </HStack>
         <Text type="supporting">Run this command in your terminal with the AWS CLI and an AWS session{access.accountId ? ` for account ${access.accountId}` : " for the cluster’s AWS account"}. It updates your local kubeconfig and current context.</Text>
         {administrators ? <Text type="supporting" data-kubectl-access="">kubectl works only for an IAM role or user the cluster grants access: {administrators === 1 ? "its administrator" : `one of its ${administrators} administrators`}, or an access entry. Only the platform’s own role is an administrator by default.</Text>
-          : <Banner status="warning" title="No one but the platform can use kubectl yet" description="Only the platform’s own role is an administrator of this cluster. Add your IAM role or user under Edit cluster → Cluster administrators, then run this command."
+          : <Banner status="warning" title="No one but the platform can use kubectl yet" description="Only the platform’s own role is an administrator of this cluster. Edit the cluster and add your IAM role or user ARN to spec.access.adminPrincipals, then run this command."
             endContent={onEditAdministrators && <Button label="Edit cluster administrators" variant="secondary" onClick={onEditAdministrators} />} />}
       </VStack>}
       <HStack hAlign="end"><Button label="Close" onClick={() => onOpenChange(false)} /></HStack>

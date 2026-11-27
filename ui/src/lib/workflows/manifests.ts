@@ -1,6 +1,4 @@
-import { create, fromJson, fromJsonString, toJsonString, type JsonObject, type DescMessage, type MessageShape } from "@bufbuild/protobuf";
-import { createValidator } from "@bufbuild/protovalidate";
-import { stringify } from "yaml";
+import { create, fromJsonString, toJsonString, type JsonObject } from "@bufbuild/protobuf";
 import { CloudAccountSchema, BootstrapTenantRequestSchema, type CloudAccount } from "../../gen/cloud/v1/tenant_service_pb";
 import { NetworkSchema, type Network } from "../../gen/cloud/v1/network_pb";
 import { ClusterSchema, ReleaseChannel, type Cluster } from "../../gen/cloud/v1/cluster_pb";
@@ -9,94 +7,107 @@ import { CreateNetworkRequestSchema } from "../../gen/cloud/v1/network_service_p
 import { CreateClusterRequestSchema } from "../../gen/cloud/v1/cluster_service_pb";
 import type { BrowserClients } from "../api/client";
 import { supportsCapability } from "../providers/registry";
-import { parseComponentValues } from "./components";
 import { reviewClusterPlacement } from "./cluster-placement";
+import { administratorsNote, checkExtendedSupport, refuseClusterTier } from "./cluster-manifest";
+import { parseImportManifest, reviewImportManifest, applyImportManifest } from "./import-manifests";
+import { checkedRequest, decodeChecked, ManifestError, readManifest, refuseLabels, type Manifest, type ManifestKind } from "./manifest-yaml";
 
-import { parseImportManifest, reviewImportManifest, applyImportManifest, importManifestTemplate } from "./import-manifests";
+export type { ManifestKind } from "./manifest-yaml";
+export { manifestTemplate } from "./manifest-templates";
 
-export type ManifestKind = "CloudAccount" | "Network" | "Cluster" | "NetworkImport" | "ClusterImport";
+export interface ReviewItem { label: string; value: string }
+/** A reviewed create or import: the exact request JSON it submits, and what review found. */
 export type ManifestReview = Readonly<{
   kind: ManifestKind; tenantId: string; name: string; requestJson: string;
-  summary: readonly { label: string; value: string }[];
+  summary: readonly ReviewItem[];
+  /** Warnings that do not block the request, such as a cluster without administrators. */
+  notes: readonly string[];
 }>;
-const validator = createValidator();
-const displayEnum = (values: Record<number, string>, value: number) => (values[value] ?? `Unknown (${value})`).toLowerCase().replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
-function checked<S extends DescMessage>(schema: S, value: MessageShape<S>) {
-  const result = validator.validate(schema, value);
-  if (result.kind !== "valid") throw new Error(result.error.message);
-  return value;
+
+export const displayEnum = (values: Record<number, string>, value: number) => (values[value] ?? `Unknown (${value})`).toLowerCase().replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
+
+export function freezeReview(review: Omit<ManifestReview, "summary" | "notes"> & { summary: ReviewItem[]; notes?: string[] }): ManifestReview {
+  return Object.freeze({ ...review, summary: Object.freeze(review.summary.map(item => Object.freeze(item))), notes: Object.freeze([...(review.notes ?? [])]) });
 }
-function object(value: unknown, label: string): JsonObject {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object.`);
-  return value as JsonObject;
+
+/** The decoded resource body of a Network or Cluster manifest (protojson names). */
+export function resourceJson({ metadata, spec }: Manifest, id?: string): JsonObject {
+  return {
+    ...(id ? { id } : {}), name: metadata.name ?? "", spec,
+    ...(metadata.displayName !== undefined ? { displayName: metadata.displayName } : {}),
+    ...(metadata.labels !== undefined ? { labels: metadata.labels } : {}),
+  };
 }
-function keys(value: JsonObject, allowed: readonly string[], label: string) {
-  const extra = Object.keys(value).find(key => !allowed.includes(key));
-  if (extra) throw new Error(`Unknown ${label} field: ${extra}.`);
+
+/** The CloudAccount a manifest states: metadata.name is the account name. */
+export function accountFromManifest(manifest: Manifest): CloudAccount {
+  refuseLabels(manifest, "metadata.labels do not apply to a CloudAccount.");
+  const account = decodeChecked(CloudAccountSchema, { ...manifest.spec, accountName: manifest.metadata.name ?? "" }, manifest.at, ([head, ...rest]) => head === "accountName" ? ["metadata", "name"] : ["spec", head, ...rest]);
+  if (account.id || account.tenantId || account.status || account.createTime || account.updateTime) throw new ManifestError("CloudAccount spec must omit output-only IDs, tenant, status and timestamps.");
+  if (!supportsCapability(account.provider.case ?? "", "account.onboard")) throw new ManifestError("This account provider does not support onboarding.", manifest.at.lineOf(["spec"]));
+  return account;
 }
 
 /** Same manifest envelope and strict generated spec codecs as the CLI. No writes. */
 export function parseManifest(text: string, kind: ManifestKind, tenantId: string, requestId: string): ManifestReview {
   if (kind === "NetworkImport" || kind === "ClusterImport") return parseImportManifest(text, kind, tenantId, requestId);
-  if (!tenantId) throw new Error("Select a tenant before creating a resource.");
-  // Reuse the bounded, safe YAML/JSON reader: 64 KiB, string keys, no custom
-  // tags, duplicate keys, recursive aliases or unbounded expansion.
-  let root: JsonObject;
-  try { root = object(parseComponentValues(text), "Manifest"); }
-  catch (error) { throw new Error(`Invalid manifest: ${error instanceof Error ? error.message : "YAML parsing failed."}`); }
-  keys(root, ["apiVersion", "kind", "metadata", "spec", "status"], "manifest");
-  if (root.apiVersion !== "cluster-vending.io/v1") throw new Error("Use apiVersion: cluster-vending.io/v1.");
-  if (root.kind !== kind) throw new Error(`Expected kind: ${kind}.`);
-  const meta = object(root.metadata, "metadata");
-  keys(meta, ["name", "id", "tenant", "displayName", "labels"], "metadata");
-  if (typeof meta.name !== "string" || !meta.name.trim()) throw new Error("metadata.name is required.");
-  if (meta.id !== undefined && meta.id !== "") throw new Error("Omit metadata.id when creating a resource. Use the detail page to update it.");
-  if (meta.tenant !== undefined && (typeof meta.tenant !== "string" || meta.tenant !== tenantId)) throw new Error(`metadata.tenant must match the active tenant (${tenantId}).`);
-  if (meta.displayName !== undefined && typeof meta.displayName !== "string") throw new Error("metadata.displayName must be a string.");
-  const spec = object(root.spec, "spec");
-  const summary = [{ label: "Tenant", value: tenantId }, { label: "Name", value: meta.name }];
+  const manifest = readManifest(text, kind, tenantId);
+  const { metadata, at } = manifest;
+  if (metadata.id !== undefined && metadata.id !== "") throw new ManifestError("Omit metadata.id when creating a resource. To change an existing one, use Edit on its detail page.", at.lineOf(["metadata", "id"]));
+  const name = metadata.name as string;
+  const summary: ReviewItem[] = [{ label: "Tenant", value: tenantId }, { label: "Name", value: name }];
+  const notes: string[] = [];
   let requestJson: string;
   if (kind === "CloudAccount") {
-    if (meta.labels !== undefined && Object.keys(object(meta.labels, "metadata.labels")).length) throw new Error("CloudAccount does not support metadata.labels.");
-    const account = fromJson(CloudAccountSchema, { ...spec, accountName: meta.name });
-    if (account.id || account.tenantId || account.status || account.createTime || account.updateTime) throw new Error("CloudAccount spec must omit output-only IDs, tenant, status and timestamps.");
-    if (!supportsCapability(account.provider.case ?? "", "account.onboard")) throw new Error("This account provider does not support onboarding.");
-    const request = checked(BootstrapTenantRequestSchema, create(BootstrapTenantRequestSchema, { tenantId, account }));
-    requestJson = toJsonString(BootstrapTenantRequestSchema, request);
+    const account = accountFromManifest(manifest);
+    requestJson = toJsonString(BootstrapTenantRequestSchema, checkedRequest(BootstrapTenantRequestSchema, create(BootstrapTenantRequestSchema, { tenantId, account })));
     summary.push({ label: "Provider", value: account.provider.case ?? "Unknown" });
     if (account.provider.case === "aws") summary.push({ label: "Cloud account ID", value: account.provider.value.accountId }, { label: "IAM role", value: account.provider.value.role || "Platform default" });
+  } else if (kind === "Network") {
+    const network = decodeChecked(NetworkSchema, resourceJson(manifest), at);
+    requestJson = toJsonString(CreateNetworkRequestSchema, checkedRequest(CreateNetworkRequestSchema, create(CreateNetworkRequestSchema, { tenantId, network, requestId })));
+    summary.push({ label: "Account ID", value: network.spec?.bootstrapId ?? "" }, { label: "Region", value: network.spec?.region ?? "" }, { label: "Tier", value: network.spec?.tier ? displayEnum(Tier, network.spec.tier) : "Tier 0 (default)" });
   } else {
-    const resource = { name: meta.name, ...(meta.displayName !== undefined ? { displayName: meta.displayName } : {}), ...(meta.labels !== undefined ? { labels: meta.labels } : {}), spec };
-    if (kind === "Network") {
-      const network = fromJson(NetworkSchema, resource);
-      const request = checked(CreateNetworkRequestSchema, create(CreateNetworkRequestSchema, { tenantId, network, requestId }));
-      requestJson = toJsonString(CreateNetworkRequestSchema, request);
-      summary.push({ label: "Account ID", value: network.spec?.bootstrapId ?? "" }, { label: "Region", value: network.spec?.region ?? "" }, { label: "Tier", value: network.spec?.tier ? displayEnum(Tier, network.spec.tier) : "Tier 0 (default)" });
-    } else {
-      if (Object.hasOwn(spec, "tier")) throw new Error("Cluster tier is inherited from its network. Omit spec.tier.");
-      const cluster = fromJson(ClusterSchema, resource);
-      const request = checked(CreateClusterRequestSchema, create(CreateClusterRequestSchema, { tenantId, cluster, requestId }));
-      requestJson = toJsonString(CreateClusterRequestSchema, request);
-      summary.push({ label: "Network ID", value: cluster.spec?.network?.networkId ?? "" }, { label: "Region", value: cluster.spec?.region ?? "" }, { label: "Release channel", value: cluster.spec?.releaseChannel ? displayEnum(ReleaseChannel, cluster.spec.releaseChannel) : "Server default" }, { label: "Kubernetes", value: cluster.spec?.controlPlane?.kubernetesVersion || "Release channel default" });
-    }
+    refuseClusterTier(manifest);
+    const cluster = decodeChecked(ClusterSchema, resourceJson(manifest), at);
+    requestJson = toJsonString(CreateClusterRequestSchema, checkedRequest(CreateClusterRequestSchema, create(CreateClusterRequestSchema, { tenantId, cluster, requestId })));
+    summary.push({ label: "Network ID", value: cluster.spec?.network?.networkId ?? "" }, { label: "Region", value: cluster.spec?.region ?? "" }, { label: "Release channel", value: cluster.spec?.releaseChannel ? displayEnum(ReleaseChannel, cluster.spec.releaseChannel) : "Server default" }, { label: "Kubernetes", value: cluster.spec?.controlPlane?.kubernetesVersion || "Release channel default" });
+    const admins = administratorsNote(cluster.spec);
+    if (admins) notes.push(admins);
   }
-  return Object.freeze({ kind, tenantId, name: meta.name, requestJson, summary: Object.freeze(summary.map(item => Object.freeze(item))) });
+  return freezeReview({ kind, tenantId, name, requestJson, summary, notes });
 }
 
+/** An error from a reference check, pointed at the manifest line that names the reference. */
+async function at<T>(manifest: Manifest, path: (string | number)[], check: () => Promise<T>): Promise<T> {
+  try { return await check(); }
+  catch (cause) {
+    if (cause instanceof ManifestError || (cause instanceof Error && cause.name === "AbortError")) throw cause;
+    const message = cause instanceof Error ? cause.message : String(cause);
+    throw new ManifestError(message, /region/i.test(message) ? manifest.at.lineOf(["spec", "region"]) : manifest.at.lineOf(path));
+  }
+}
+
+/** Parses, then checks the references in the active tenant (read only) and the server's version rules. */
 export async function reviewManifest(api: BrowserClients, text: string, kind: ManifestKind, tenantId: string, requestId: string, signal: AbortSignal): Promise<ManifestReview> {
   signal.throwIfAborted();
   if (kind === "NetworkImport" || kind === "ClusterImport") return reviewImportManifest(api, text, kind, tenantId, requestId, signal);
   const review = parseManifest(text, kind, tenantId, requestId);
+  const manifest = readManifest(text, kind, tenantId);
   if (kind === "Cluster") {
     const spec = fromJsonString(CreateClusterRequestSchema, review.requestJson).cluster!.spec!;
-    return reviewClusterPlacement(api, review, spec.network!.networkId, signal, spec.region);
+    const placed = await at(manifest, ["spec", "network", "networkId"], () => reviewClusterPlacement(api, review, spec.network?.networkId ?? "", signal, spec.region));
+    const note = await checkExtendedSupport(api, tenantId, spec, manifest, signal);
+    return note ? freezeReview({ ...placed, summary: [...placed.summary], notes: [...placed.notes, note] }) : placed;
   }
   if (kind === "Network") {
     const accountId = fromJsonString(CreateNetworkRequestSchema, review.requestJson).network!.spec!.bootstrapId;
-    const { account } = await api.tenant.getCloudAccount({ tenantId, id: accountId }, { signal });
-    signal.throwIfAborted();
-    if (!account || account.id !== accountId || account.tenantId !== tenantId) throw new Error("The referenced account does not belong to this tenant.");
-    if (!supportsCapability(account.provider.case ?? "", "network.create")) throw new Error("The referenced account has no supported provider for this resource.");
+    await at(manifest, ["spec", "bootstrapId"], async () => {
+      const { account } = await api.tenant.getCloudAccount({ tenantId, id: accountId }, { signal });
+      signal.throwIfAborted();
+      if (!account || account.id !== accountId || account.tenantId !== tenantId) throw new Error("The referenced account does not belong to this tenant.");
+      if (!supportsCapability(account.provider.case ?? "", "network.create")) throw new Error("The referenced account has no supported provider for this resource.");
+    });
   }
   return review;
 }
@@ -122,12 +133,4 @@ export async function applyManifest(api: BrowserClients, review: ManifestReview,
   signal.throwIfAborted();
   if (!resource?.id || resource.tenantId !== review.tenantId) throw new Error("The response did not identify an accepted resource in this tenant. Refresh inventory before retrying.");
   return resource;
-}
-
-export function manifestTemplate(kind: ManifestKind, tenantId: string): string {
-  if (kind === "NetworkImport" || kind === "ClusterImport") return importManifestTemplate(kind, tenantId);
-  const spec = kind === "CloudAccount" ? { aws: { accountId: "111122223333", role: "cluster-vending-provisioner" } }
-    : kind === "Network" ? { bootstrapId: "REPLACE_WITH_ACCOUNT_UUID", region: "us-west-1", tier: "TIER_2", layout: { cidrBlock: "10.0.0.0/16", availabilityZoneCount: 3, natGatewayMode: "NAT_GATEWAY_MODE_SINGLE" } }
-    : { region: "us-west-1", network: { networkId: "REPLACE_WITH_NETWORK_UUID" }, aws: {}, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, releaseChannel: "RELEASE_CHANNEL_STABLE", upgradeMode: "UPGRADE_MODE_MANUAL" };
-  return stringify({ apiVersion: "cluster-vending.io/v1", kind, metadata: { name: kind === "CloudAccount" ? "production" : "prod", tenant: tenantId }, spec });
 }

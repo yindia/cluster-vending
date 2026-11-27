@@ -31,6 +31,7 @@ func ClusterCreate(ctx context.Context, c Clients, o Options) (proto.Message, er
 	if err != nil {
 		return nil, err
 	}
+	addSelfAdmin(ctx, o, cl)
 	req := &cloudv1.CreateClusterRequest{TenantId: tenant, Cluster: cl}
 	if req.RequestId, err = requestID(tenant, req); err != nil {
 		return nil, err

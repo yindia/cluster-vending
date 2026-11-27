@@ -68,7 +68,13 @@ spec:
   # days accepts WEEKDAY_MONDAY through WEEKDAY_SUNDAY, with no duplicates.
   # duration also accepts minutes/combinations, e.g. 90m or 1h30m.
   access:
-    adminPrincipals: []      # IAM role/user ARNs, e.g. arn:aws:iam::111122223333:role/platform-admin; the creator is admin already
+    # Cluster admins: IAM role or user ARNs. By default the platform's role is
+    # the only admin. `cluster create` adds you (the IAM principal of your AWS
+    # credentials; an assumed role as its role ARN) unless --no-self-admin; with
+    # no AWS credentials it warns and adds no one.
+    adminPrincipals: []
+    # adminPrincipals:
+    #   - arn:aws:iam::111122223333:role/platform-admin
     # Up to 20 admins; removing a principal revokes its managed admin access.
     # Other IAM principals and scoped EKS policies (up to 50 entries):
     # accessEntries:
@@ -143,5 +149,6 @@ spec:
     # Defaults can also be listed to override their version/configurationValues.
     # The platform does not create EFS/FSx file systems or S3 buckets for CSI add-ons.
 # Platform components are managed by the platform catalog, not fields in this file.
-# Freeze/unfreeze uses admin commands. Do not set spec.tier (use the network tier),
+# Freeze and unfreeze with `tenant freeze` / `tenant unfreeze` (operators:
+# `admin freeze`). Do not set spec.tier (use the network tier),
 # status, generation, etag or timestamps. GCP/Azure settings are not implemented yet.

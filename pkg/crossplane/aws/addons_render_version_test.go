@@ -24,7 +24,7 @@ import (
 var addonRenderGolden = struct {
 	version int
 	sha256  string
-}{version: 11, sha256: "32359f804835a80e43305702c4d589a92b046f94e956d4ff982f0782c83ec3c3"}
+}{version: 12, sha256: "00dfa124651dc85f5368017c0e50caacd306f9ca66ddf7eebad2003b5153b14f"}
 
 func TestAddonRenderChangeBumpsRenderVersion(t *testing.T) {
 	var addons []*awseks.Addon

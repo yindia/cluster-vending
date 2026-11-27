@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
@@ -76,13 +75,11 @@ func stageKinds(stages []teardownStage) []string {
 
 // teardownStep is what one pass of a teardown does: the objects to ask to
 // delete now, and the ones it waits for (the current stage's, deleted or
-// not), with the message the cluster's status shows meanwhile. since is the
-// oldest deletion request among the objects waited for: where a node
-// stage's timeout counts from (zero: nothing was asked yet).
+// not), with the message the cluster's status shows meanwhile. (A stage's
+// timeout counts from the stage's start, which its caller keeps.)
 type teardownStep struct {
 	delete, waiting []reconcile.WorkloadObject
 	message         string
-	since           time.Time
 }
 
 func (t teardownStep) finished() bool { return len(t.waiting) == 0 }
@@ -108,10 +105,6 @@ func planTeardown(stages []teardownStage, objs []reconcile.WorkloadObject) teard
 		for _, o := range stage {
 			if !o.Deleting {
 				step.delete = append(step.delete, o)
-				continue
-			}
-			if !o.DeletedAt.IsZero() && (step.since.IsZero() || o.DeletedAt.Before(step.since)) {
-				step.since = o.DeletedAt
 			}
 		}
 		return step

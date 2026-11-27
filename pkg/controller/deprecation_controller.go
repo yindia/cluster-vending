@@ -63,7 +63,7 @@ func NewDeprecationReconciler(d Deps) (*DeprecationReconciler, error) {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=create;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=cluster-vending-kubeconfig-reader;cluster-vending-usage-history-writer,verbs=bind
 
-// SetupWithManager registers the scanner: one cluster at a time, woken by
+// SetupWithManager registers the scanner: Deps.ScanWorkers clusters at a time, woken by
 // a change of what it scans for (scanTriggered) and by its own schedule.
 func (r *DeprecationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).Named("cluster-deprecations").
@@ -74,6 +74,7 @@ func (r *DeprecationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				return !okOld || !okNew || scanTriggered(o, n)
 			},
 		})).
+		WithOptions(scanOptions(r.deps)).
 		Complete(r)
 }
 
@@ -110,6 +111,10 @@ func (r *DeprecationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if frozen.Holds() || managed.IsPaused(obj) || id == "" || !scannable(obj) {
 		return ctrl.Result{RequeueAfter: notScannableDelay}, nil
 	}
+	kubeconfig := func(ctx context.Context) ([]byte, error) { return r.kubeconfig(ctx, obj) }
+	if wait, skip := r.deps.Reachability.Skip(ctx, obj, kubeconfig); skip {
+		return ctrl.Result{RequeueAfter: wait}, nil
+	}
 	current := obj.Status.CurrentKubernetesVersion
 	if current == "" && obj.Spec.ControlPlane != nil {
 		current = obj.Spec.ControlPlane.KubernetesVersion
@@ -129,7 +134,7 @@ func (r *DeprecationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	next, err := scanner.Run(ctx, deprecations.Cluster{
 		TenantID: tenant, ID: id, Current: current, UpgradeTo: r.upgradeTo(ctx, obj, current),
 		Last:       convert.DeprecationsFromAPI(obj.Status.Deprecations),
-		Kubeconfig: func(ctx context.Context) ([]byte, error) { return r.kubeconfig(ctx, obj) },
+		Kubeconfig: kubeconfig,
 	})
 	if err != nil {
 		return ctrl.Result{}, err

@@ -125,10 +125,9 @@ func describeRelease(w io.Writer, r *cloudv1.Release, wide bool) error {
 	}
 	minors := make([][]string, 0, len(r.GetKubernetes()))
 	for _, m := range r.GetKubernetes() {
-		minors = append(minors, []string{m.GetMinor(), channelWord(m.GetChannel()), yesNo(m.GetDefault()),
-			orNone(m.GetUpgradeTo()), date(m.GetEndOfSupport()), endingWord(m.GetEnding())})
+		minors = append(minors, minorRow(m))
 	}
-	if err := section(w, "Kubernetes", []string{"MINOR", "CHANNEL", "DEFAULT", "UPGRADE-TO", "END-OF-SUPPORT", "ENDING"}, minors); err != nil {
+	if err := section(w, "Kubernetes", minorHeader, minors); err != nil {
 		return err
 	}
 	for _, m := range r.GetKubernetes() {
@@ -149,6 +148,15 @@ func describeRelease(w io.Writer, r *cloudv1.Release, wide bool) error {
 		}
 	}
 	return nil
+}
+
+// minorHeader and minorRow are a release's Kubernetes minors, as admin
+// release get and cluster versions print them.
+var minorHeader = []string{"MINOR", "CHANNEL", "DEFAULT", "UPGRADE-TO", "END-OF-SUPPORT", "ENDING"}
+
+func minorRow(m *cloudv1.ReleaseMinor) []string {
+	return []string{m.GetMinor(), channelWord(m.GetChannel()), yesNo(m.GetDefault()),
+		orNone(m.GetUpgradeTo()), date(m.GetEndOfSupport()), endingWord(m.GetEnding())}
 }
 
 func endingWord(ending bool) string {

@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/buildserial"
 )
 
 // ShippedHashAnnotation holds the SpecHash of the spec a build shipped: a
@@ -44,6 +45,11 @@ type Result struct {
 	// Kept: being deleted already (its in-use guard holds it while
 	// something uses it); left alone.
 	Kept []string
+	// Newer: shipped by a newer build (its serial, buildserial, is above
+	// this build's); neither replaced nor deleted, so an older build (a
+	// rollback, an old pod) never reverts the catalog. The ready check
+	// fails while there is any (buildserial.Check).
+	Newer []string
 }
 
 // Install syncs the shipped definitions. The CustomResourceDefinition of
@@ -122,8 +128,11 @@ func specHashBeforeProvider(spec cloudv1alpha1.ComponentDefinitionSpec) string {
 //     otherwise left;
 //   - shipped, unedited and no longer in the build: deleted (the in-use
 //     guard holds it while something uses it);
-//   - anything else (the platform team's own definitions): left.
+//   - anything else (the platform team's own definitions): left;
+//   - stamped by a newer build (buildserial): left, whatever the rest
+//     says, so an older build never reverts the catalog (Result.Newer).
 //
+// What it creates, adopts or replaces is stamped with this build's serial.
 // The inputs are not changed.
 func Sync(ctx context.Context, c client.Client, defs []*cloudv1alpha1.ComponentDefinition) (Result, error) {
 	var out Result
@@ -142,6 +151,10 @@ func Sync(ctx context.Context, c client.Client, defs []*cloudv1alpha1.ComponentD
 	for i := range list.Items {
 		d := &list.Items[i]
 		if inBuild[d.Name] || !isShipped(d) {
+			continue
+		}
+		if newerBuild(d) {
+			out.Newer = append(out.Newer, d.Name)
 			continue
 		}
 		if !unedited(d) {
@@ -177,6 +190,10 @@ func syncOne(ctx context.Context, c client.Client, def *cloudv1alpha1.ComponentD
 	if !current.DeletionTimestamp.IsZero() {
 		// Its delete was asked for: not recreated or changed meanwhile.
 		out.Kept = append(out.Kept, def.Name)
+		return nil
+	}
+	if newerBuild(current) {
+		out.Newer = append(out.Newer, def.Name)
 		return nil
 	}
 	want := SpecHash(def.Spec)
@@ -215,8 +232,19 @@ func asShipped(d *cloudv1alpha1.ComponentDefinition) *cloudv1alpha1.ComponentDef
 		d.Annotations = map[string]string{}
 	}
 	d.Labels[cloudv1alpha1.LabelShipped] = "true"
+	d.Annotations = buildserial.Stamp(d.Annotations)
 	d.Annotations[ShippedHashAnnotation] = SpecHash(d.Spec)
 	return d
+}
+
+// newerBuild reports whether a newer build shipped d (its serial is above
+// this build's), recording the refusal for the ready check.
+func newerBuild(d *cloudv1alpha1.ComponentDefinition) bool {
+	newer, serial := buildserial.Newer(d.Annotations)
+	if newer {
+		buildserial.Refuse("ComponentDefinition "+d.Name, serial)
+	}
+	return newer
 }
 
 // isShipped: a build created or adopted d.

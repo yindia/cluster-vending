@@ -6,46 +6,31 @@ import (
 	"strconv"
 	"time"
 
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/yindia/cluster-vending/pkg/deprecation"
 	"github.com/yindia/cluster-vending/pkg/reconcile"
 )
 
 // Workloads is reconcile.Workloads with the kubeconfig Secrets of the
 // management cluster, read with c (at the API server: the controller may
-// get them in tenant namespaces only). A kubeconfig that would run a
-// command is refused (deprecation.RESTConfig).
-func Workloads(c client.Reader) reconcile.Workloads { return workloads{c: c} }
+// get them in tenant namespaces only), on a WorkloadCache of its own. A
+// kubeconfig that would run a command is refused (deprecation.RESTConfig).
+func Workloads(c client.Reader) reconcile.Workloads {
+	return NewWorkloadCache(c, WorkloadCacheOptions{})
+}
 
-type workloads struct{ c client.Reader }
-
-func (w workloads) HelmStorage(ctx context.Context, namespace, secretRef string) (reconcile.HelmStorage, error) {
-	kubeconfig, err := reconcile.ReadKubeconfig(ctx, w.c, namespace, secretRef)
+// HelmStorage is the Helm release records of the workload cluster, and
+// for a recovery Helm itself (reconcile.HelmOperator), on its cached
+// client.
+func (w *WorkloadCache) HelmStorage(ctx context.Context, namespace, secretRef string) (reconcile.HelmStorage, error) {
+	entry, err := w.entry(ctx, namespace, secretRef)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := deprecation.RESTConfig(kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		return nil, err
-	}
-	if err := batchv1.AddToScheme(scheme); err != nil {
-		return nil, err
-	}
-	c, err := client.New(cfg, client.Options{Scheme: scheme})
-	if err != nil {
-		return nil, fmt.Errorf("workload cluster client: %w", err)
-	}
-	// Records and, for a recovery, Helm itself (reconcile.HelmOperator).
-	return newHelmOps(c, cfg), nil
+	return newHelmOps(entry.client, rest.CopyConfig(entry.cfg)), nil
 }
 
 // Helm's labels on a release record (helm.sh/helm/v4

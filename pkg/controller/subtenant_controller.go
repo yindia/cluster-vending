@@ -315,7 +315,7 @@ func (r *SubTenantReconciler) subTenantReport(ctx context.Context, obj *cloud.Su
 			accessReason = "PrerequisitesPending"
 		}
 		subTenantAccessCondition(&st, obj.Generation, "AccessReady", false, accessReason, message)
-		for _, kind := range []string{conditionGroupsAllowed, "OIDCReady"} {
+		for _, kind := range subTenantAccessGates {
 			subTenantAccessCondition(&st, obj.Generation, kind, false, "PrerequisitesPending", "Provisioning prerequisites are not current")
 		}
 	}

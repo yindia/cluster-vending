@@ -1544,10 +1544,11 @@ const file_cloud_v1_tenant_service_proto_rawDesc = "" +
 	"\x1fCLOUD_ACCOUNT_STATE_UNSPECIFIED\x10\x00\x12%\n" +
 	"!CLOUD_ACCOUNT_STATE_BOOTSTRAPPING\x10\x01\x12\x1d\n" +
 	"\x19CLOUD_ACCOUNT_STATE_READY\x10\x02\x12\x1e\n" +
-	"\x1aCLOUD_ACCOUNT_STATE_FAILED\x10\x032\xae\v\n" +
+	"\x1aCLOUD_ACCOUNT_STATE_FAILED\x10\x032\x82\f\n" +
 	"\rTenantService\x12O\n" +
 	"\vListTenants\x12\x1c.cloud.v1.ListTenantsRequest\x1a\x1d.cloud.v1.ListTenantsResponse\"\x03\x90\x02\x01\x12R\n" +
-	"\fCreateTenant\x12\x1d.cloud.v1.CreateTenantRequest\x1a\x1e.cloud.v1.CreateTenantResponse\"\x03\x90\x02\x02\x12A\n" +
+	"\fCreateTenant\x12\x1d.cloud.v1.CreateTenantRequest\x1a\x1e.cloud.v1.CreateTenantResponse\"\x03\x90\x02\x02\x12R\n" +
+	"\fDeleteTenant\x12\x1d.cloud.v1.DeleteTenantRequest\x1a\x1e.cloud.v1.DeleteTenantResponse\"\x03\x90\x02\x02\x12A\n" +
 	"\x06Freeze\x12\x1d.cloud.v1.TenantFreezeRequest\x1a\x18.cloud.v1.FreezeResponse\x12G\n" +
 	"\bUnfreeze\x12\x1f.cloud.v1.TenantUnfreezeRequest\x1a\x1a.cloud.v1.UnfreezeResponse\x12O\n" +
 	"\tGetFreeze\x12 .cloud.v1.TenantGetFreezeRequest\x1a\x1b.cloud.v1.GetFreezeResponse\"\x03\x90\x02\x01\x12X\n" +
@@ -1606,22 +1607,24 @@ var file_cloud_v1_tenant_service_proto_goTypes = []any{
 	(*ManagedResource)(nil),                  // 23: cloud.v1.ManagedResource
 	(*ListTenantsRequest)(nil),               // 24: cloud.v1.ListTenantsRequest
 	(*CreateTenantRequest)(nil),              // 25: cloud.v1.CreateTenantRequest
-	(*TenantFreezeRequest)(nil),              // 26: cloud.v1.TenantFreezeRequest
-	(*TenantUnfreezeRequest)(nil),            // 27: cloud.v1.TenantUnfreezeRequest
-	(*TenantGetFreezeRequest)(nil),           // 28: cloud.v1.TenantGetFreezeRequest
-	(*TenantListReleasesRequest)(nil),        // 29: cloud.v1.TenantListReleasesRequest
-	(*TenantGetReleaseRequest)(nil),          // 30: cloud.v1.TenantGetReleaseRequest
-	(*TenantListReleaseChannelsRequest)(nil), // 31: cloud.v1.TenantListReleaseChannelsRequest
-	(*TenantGetReleaseChannelRequest)(nil),   // 32: cloud.v1.TenantGetReleaseChannelRequest
-	(*ListTenantsResponse)(nil),              // 33: cloud.v1.ListTenantsResponse
-	(*CreateTenantResponse)(nil),             // 34: cloud.v1.CreateTenantResponse
-	(*FreezeResponse)(nil),                   // 35: cloud.v1.FreezeResponse
-	(*UnfreezeResponse)(nil),                 // 36: cloud.v1.UnfreezeResponse
-	(*GetFreezeResponse)(nil),                // 37: cloud.v1.GetFreezeResponse
-	(*ListReleasesResponse)(nil),             // 38: cloud.v1.ListReleasesResponse
-	(*GetReleaseResponse)(nil),               // 39: cloud.v1.GetReleaseResponse
-	(*ListReleaseChannelsResponse)(nil),      // 40: cloud.v1.ListReleaseChannelsResponse
-	(*GetReleaseChannelResponse)(nil),        // 41: cloud.v1.GetReleaseChannelResponse
+	(*DeleteTenantRequest)(nil),              // 26: cloud.v1.DeleteTenantRequest
+	(*TenantFreezeRequest)(nil),              // 27: cloud.v1.TenantFreezeRequest
+	(*TenantUnfreezeRequest)(nil),            // 28: cloud.v1.TenantUnfreezeRequest
+	(*TenantGetFreezeRequest)(nil),           // 29: cloud.v1.TenantGetFreezeRequest
+	(*TenantListReleasesRequest)(nil),        // 30: cloud.v1.TenantListReleasesRequest
+	(*TenantGetReleaseRequest)(nil),          // 31: cloud.v1.TenantGetReleaseRequest
+	(*TenantListReleaseChannelsRequest)(nil), // 32: cloud.v1.TenantListReleaseChannelsRequest
+	(*TenantGetReleaseChannelRequest)(nil),   // 33: cloud.v1.TenantGetReleaseChannelRequest
+	(*ListTenantsResponse)(nil),              // 34: cloud.v1.ListTenantsResponse
+	(*CreateTenantResponse)(nil),             // 35: cloud.v1.CreateTenantResponse
+	(*DeleteTenantResponse)(nil),             // 36: cloud.v1.DeleteTenantResponse
+	(*FreezeResponse)(nil),                   // 37: cloud.v1.FreezeResponse
+	(*UnfreezeResponse)(nil),                 // 38: cloud.v1.UnfreezeResponse
+	(*GetFreezeResponse)(nil),                // 39: cloud.v1.GetFreezeResponse
+	(*ListReleasesResponse)(nil),             // 40: cloud.v1.ListReleasesResponse
+	(*GetReleaseResponse)(nil),               // 41: cloud.v1.GetReleaseResponse
+	(*ListReleaseChannelsResponse)(nil),      // 42: cloud.v1.ListReleaseChannelsResponse
+	(*GetReleaseChannelResponse)(nil),        // 43: cloud.v1.GetReleaseChannelResponse
 }
 var file_cloud_v1_tenant_service_proto_depIdxs = []int32{
 	16, // 0: cloud.v1.BootstrapTenantRequest.account:type_name -> cloud.v1.CloudAccount
@@ -1645,38 +1648,40 @@ var file_cloud_v1_tenant_service_proto_depIdxs = []int32{
 	20, // 18: cloud.v1.AccountAccess.checks:type_name -> cloud.v1.AccessResult
 	24, // 19: cloud.v1.TenantService.ListTenants:input_type -> cloud.v1.ListTenantsRequest
 	25, // 20: cloud.v1.TenantService.CreateTenant:input_type -> cloud.v1.CreateTenantRequest
-	26, // 21: cloud.v1.TenantService.Freeze:input_type -> cloud.v1.TenantFreezeRequest
-	27, // 22: cloud.v1.TenantService.Unfreeze:input_type -> cloud.v1.TenantUnfreezeRequest
-	28, // 23: cloud.v1.TenantService.GetFreeze:input_type -> cloud.v1.TenantGetFreezeRequest
-	29, // 24: cloud.v1.TenantService.ListReleases:input_type -> cloud.v1.TenantListReleasesRequest
-	30, // 25: cloud.v1.TenantService.GetRelease:input_type -> cloud.v1.TenantGetReleaseRequest
-	31, // 26: cloud.v1.TenantService.ListReleaseChannels:input_type -> cloud.v1.TenantListReleaseChannelsRequest
-	32, // 27: cloud.v1.TenantService.GetReleaseChannel:input_type -> cloud.v1.TenantGetReleaseChannelRequest
-	3,  // 28: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
-	5,  // 29: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
-	14, // 30: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
-	9,  // 31: cloud.v1.TenantService.VerifyCloudAccount:input_type -> cloud.v1.VerifyCloudAccountRequest
-	7,  // 32: cloud.v1.TenantService.DeleteCloudAccount:input_type -> cloud.v1.DeleteCloudAccountRequest
-	11, // 33: cloud.v1.TenantService.GetAccountOnboarding:input_type -> cloud.v1.GetAccountOnboardingRequest
-	1,  // 34: cloud.v1.TenantService.WhoAmI:input_type -> cloud.v1.WhoAmIRequest
-	33, // 35: cloud.v1.TenantService.ListTenants:output_type -> cloud.v1.ListTenantsResponse
-	34, // 36: cloud.v1.TenantService.CreateTenant:output_type -> cloud.v1.CreateTenantResponse
-	35, // 37: cloud.v1.TenantService.Freeze:output_type -> cloud.v1.FreezeResponse
-	36, // 38: cloud.v1.TenantService.Unfreeze:output_type -> cloud.v1.UnfreezeResponse
-	37, // 39: cloud.v1.TenantService.GetFreeze:output_type -> cloud.v1.GetFreezeResponse
-	38, // 40: cloud.v1.TenantService.ListReleases:output_type -> cloud.v1.ListReleasesResponse
-	39, // 41: cloud.v1.TenantService.GetRelease:output_type -> cloud.v1.GetReleaseResponse
-	40, // 42: cloud.v1.TenantService.ListReleaseChannels:output_type -> cloud.v1.ListReleaseChannelsResponse
-	41, // 43: cloud.v1.TenantService.GetReleaseChannel:output_type -> cloud.v1.GetReleaseChannelResponse
-	4,  // 44: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
-	6,  // 45: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
-	15, // 46: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
-	10, // 47: cloud.v1.TenantService.VerifyCloudAccount:output_type -> cloud.v1.VerifyCloudAccountResponse
-	8,  // 48: cloud.v1.TenantService.DeleteCloudAccount:output_type -> cloud.v1.DeleteCloudAccountResponse
-	12, // 49: cloud.v1.TenantService.GetAccountOnboarding:output_type -> cloud.v1.GetAccountOnboardingResponse
-	2,  // 50: cloud.v1.TenantService.WhoAmI:output_type -> cloud.v1.WhoAmIResponse
-	35, // [35:51] is the sub-list for method output_type
-	19, // [19:35] is the sub-list for method input_type
+	26, // 21: cloud.v1.TenantService.DeleteTenant:input_type -> cloud.v1.DeleteTenantRequest
+	27, // 22: cloud.v1.TenantService.Freeze:input_type -> cloud.v1.TenantFreezeRequest
+	28, // 23: cloud.v1.TenantService.Unfreeze:input_type -> cloud.v1.TenantUnfreezeRequest
+	29, // 24: cloud.v1.TenantService.GetFreeze:input_type -> cloud.v1.TenantGetFreezeRequest
+	30, // 25: cloud.v1.TenantService.ListReleases:input_type -> cloud.v1.TenantListReleasesRequest
+	31, // 26: cloud.v1.TenantService.GetRelease:input_type -> cloud.v1.TenantGetReleaseRequest
+	32, // 27: cloud.v1.TenantService.ListReleaseChannels:input_type -> cloud.v1.TenantListReleaseChannelsRequest
+	33, // 28: cloud.v1.TenantService.GetReleaseChannel:input_type -> cloud.v1.TenantGetReleaseChannelRequest
+	3,  // 29: cloud.v1.TenantService.BootstrapTenant:input_type -> cloud.v1.BootstrapTenantRequest
+	5,  // 30: cloud.v1.TenantService.GetCloudAccount:input_type -> cloud.v1.GetCloudAccountRequest
+	14, // 31: cloud.v1.TenantService.ListCloudAccounts:input_type -> cloud.v1.ListCloudAccountsRequest
+	9,  // 32: cloud.v1.TenantService.VerifyCloudAccount:input_type -> cloud.v1.VerifyCloudAccountRequest
+	7,  // 33: cloud.v1.TenantService.DeleteCloudAccount:input_type -> cloud.v1.DeleteCloudAccountRequest
+	11, // 34: cloud.v1.TenantService.GetAccountOnboarding:input_type -> cloud.v1.GetAccountOnboardingRequest
+	1,  // 35: cloud.v1.TenantService.WhoAmI:input_type -> cloud.v1.WhoAmIRequest
+	34, // 36: cloud.v1.TenantService.ListTenants:output_type -> cloud.v1.ListTenantsResponse
+	35, // 37: cloud.v1.TenantService.CreateTenant:output_type -> cloud.v1.CreateTenantResponse
+	36, // 38: cloud.v1.TenantService.DeleteTenant:output_type -> cloud.v1.DeleteTenantResponse
+	37, // 39: cloud.v1.TenantService.Freeze:output_type -> cloud.v1.FreezeResponse
+	38, // 40: cloud.v1.TenantService.Unfreeze:output_type -> cloud.v1.UnfreezeResponse
+	39, // 41: cloud.v1.TenantService.GetFreeze:output_type -> cloud.v1.GetFreezeResponse
+	40, // 42: cloud.v1.TenantService.ListReleases:output_type -> cloud.v1.ListReleasesResponse
+	41, // 43: cloud.v1.TenantService.GetRelease:output_type -> cloud.v1.GetReleaseResponse
+	42, // 44: cloud.v1.TenantService.ListReleaseChannels:output_type -> cloud.v1.ListReleaseChannelsResponse
+	43, // 45: cloud.v1.TenantService.GetReleaseChannel:output_type -> cloud.v1.GetReleaseChannelResponse
+	4,  // 46: cloud.v1.TenantService.BootstrapTenant:output_type -> cloud.v1.BootstrapTenantResponse
+	6,  // 47: cloud.v1.TenantService.GetCloudAccount:output_type -> cloud.v1.GetCloudAccountResponse
+	15, // 48: cloud.v1.TenantService.ListCloudAccounts:output_type -> cloud.v1.ListCloudAccountsResponse
+	10, // 49: cloud.v1.TenantService.VerifyCloudAccount:output_type -> cloud.v1.VerifyCloudAccountResponse
+	8,  // 50: cloud.v1.TenantService.DeleteCloudAccount:output_type -> cloud.v1.DeleteCloudAccountResponse
+	12, // 51: cloud.v1.TenantService.GetAccountOnboarding:output_type -> cloud.v1.GetAccountOnboardingResponse
+	2,  // 52: cloud.v1.TenantService.WhoAmI:output_type -> cloud.v1.WhoAmIResponse
+	36, // [36:53] is the sub-list for method output_type
+	19, // [19:36] is the sub-list for method input_type
 	19, // [19:19] is the sub-list for extension type_name
 	19, // [19:19] is the sub-list for extension extendee
 	0,  // [0:19] is the sub-list for field type_name

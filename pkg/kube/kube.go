@@ -37,12 +37,21 @@ import (
 	"github.com/yindia/cluster-vending/pkg/version"
 )
 
-// Client-side rate limits. The defaults of client-go (5 QPS, burst 10) are
-// too low for creating a cluster's ~30 managed resources at once.
+// Client-side rate limits of the management cluster's client, unless
+// configured (--kube-qps, --kube-burst). The defaults of client-go (5 QPS,
+// burst 10) are too low for creating a cluster's ~30 managed resources at
+// once.
 const (
 	DefaultQPS   = 50
 	DefaultBurst = 100
 )
+
+// RateLimits are a client's client-side rate limits; a zero field is its
+// default (DefaultQPS, DefaultBurst).
+type RateLimits struct {
+	QPS   float32
+	Burst int
+}
 
 // TenantNamespacePrefix prefixes every tenant namespace: one namespace per
 // tenant holds all its managed resources and its ProviderConfigs.
@@ -57,6 +66,11 @@ func TenantNamespace(tenantID string) string { return TenantNamespacePrefix + te
 // and falls back to the in-cluster service account when neither exists.
 // kubeContext selects a context; empty uses the current one.
 func RESTConfig(kubeconfig, kubeContext string) (*rest.Config, error) {
+	return RESTConfigWith(kubeconfig, kubeContext, RateLimits{})
+}
+
+// RESTConfigWith is RESTConfig with the client-side rate limits l.
+func RESTConfigWith(kubeconfig, kubeContext string, l RateLimits) (*rest.Config, error) {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	if kubeconfig != "" {
 		rules.ExplicitPath = kubeconfig
@@ -67,8 +81,13 @@ func RESTConfig(kubeconfig, kubeContext string) (*rest.Config, error) {
 		return nil, fmt.Errorf("kubernetes config: %w", err)
 	}
 	cfg = rest.CopyConfig(cfg)
-	cfg.QPS = DefaultQPS
-	cfg.Burst = DefaultBurst
+	cfg.QPS, cfg.Burst = DefaultQPS, DefaultBurst
+	if l.QPS > 0 {
+		cfg.QPS = l.QPS
+	}
+	if l.Burst > 0 {
+		cfg.Burst = l.Burst
+	}
 	cfg.UserAgent = "cluster-vending/" + version.Version
 	return cfg, nil
 }

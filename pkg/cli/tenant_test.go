@@ -118,3 +118,49 @@ func TestTenantDirectoryCLI(t *testing.T) {
 		t.Fatal("invalid create sent")
 	}
 }
+
+type tenantDeleter struct {
+	tenantRecorder
+	deletes []*cloud.DeleteTenantRequest
+	err     error
+}
+
+func (r *tenantDeleter) DeleteTenant(_ context.Context, req *cloud.DeleteTenantRequest) (*cloud.DeleteTenantResponse, error) {
+	r.deletes = append(r.deletes, req)
+	if r.err != nil {
+		return nil, r.err
+	}
+	return &cloud.DeleteTenantResponse{Tenant: &cloud.TenantInfo{Id: req.TenantId}}, nil
+}
+
+func (r *tenantDeleter) ListTenants(context.Context, *cloud.ListTenantsRequest) (*cloud.ListTenantsResponse, error) {
+	r.lists++
+	if r.lists < 2 {
+		return &cloud.ListTenantsResponse{Tenants: []*cloud.TenantInfo{{Id: "acme"}}}, nil
+	}
+	return &cloud.ListTenantsResponse{}, nil
+}
+
+func TestTenantDeleteWaitsUntilUnlisted(t *testing.T) {
+	r := &tenantDeleter{}
+	var out, progress bytes.Buffer
+	o := Options{ID: "acme", Wait: true, PollInterval: time.Millisecond, Progress: &progress, Timeout: time.Minute}
+	if err := Run(t.Context(), TenantDelete, Clients{Tenant: r}, o, &out, OutputJSON); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.deletes) != 1 || r.deletes[0].GetTenantId() != "acme" || r.lists < 2 {
+		t.Fatalf("deletes %v, lists %d", r.deletes, r.lists)
+	}
+	if !strings.Contains(progress.String(), "tenant-acme is unregistered and kept") || !strings.Contains(progress.String(), "Tenant acme: deleted") {
+		t.Fatalf("progress = %q", progress.String())
+	}
+}
+
+func TestTenantDeleteRefusalIsShown(t *testing.T) {
+	r := &tenantDeleter{err: connect.NewError(connect.CodeFailedPrecondition, "tenant acme still has 1 cluster (prod)")}
+	var out bytes.Buffer
+	err := Run(t.Context(), TenantDelete, Clients{Tenant: r}, Options{ID: "acme"}, &out, OutputTable)
+	if err == nil || !strings.Contains(err.Error(), "1 cluster (prod)") {
+		t.Fatalf("err = %v", err)
+	}
+}

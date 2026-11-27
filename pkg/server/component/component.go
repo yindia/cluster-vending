@@ -293,6 +293,7 @@ func definitionMessage(e entry, versions map[string]string) (*cloudv1.ComponentD
 		Name: e.Name, Description: e.object.Spec.Description, Requires: slices.Clone(e.Requires),
 		ConflictsWithAddons: slices.Clone(e.ConflictsWithAddons), Management: management(e.Definition),
 		Configurable: configurable(e.Definition), Versions: versions, Provider: providerOf(e.Provider),
+		CloudResources: cloudResourcesMessage(e.CloudResources),
 	}
 	var err error
 	// The default config the platform applies is shown for every component,
@@ -309,6 +310,23 @@ func definitionMessage(e entry, versions map[string]string) (*cloudv1.ComponentD
 		return nil, err
 	}
 	return out, nil
+}
+
+// cloudResourcesMessage is what the platform creates in the tenant's
+// account for a component (its IAM role); nil for nothing.
+func cloudResourcesMessage(r core.CloudResources) *cloudv1.ComponentCloudResources {
+	if r.IAMRole == nil {
+		return nil
+	}
+	role := &cloudv1.ComponentIamRole{Access: cloudv1.ComponentIamAccess_COMPONENT_IAM_ACCESS_IRSA,
+		Policy: r.IAMRole.Policy, ManagedPolicyArns: slices.Clone(r.IAMRole.ManagedPolicyARNs)}
+	if r.IAMRole.Access == core.PodIdentity {
+		role.Access = cloudv1.ComponentIamAccess_COMPONENT_IAM_ACCESS_POD_IDENTITY
+	}
+	for _, sa := range r.IAMRole.ServiceAccounts {
+		role.ServiceAccounts = append(role.ServiceAccounts, &cloudv1.ComponentServiceAccount{Namespace: sa.Namespace, Name: sa.Name})
+	}
+	return &cloudv1.ComponentCloudResources{IamRole: role}
 }
 
 // providerOf is a definition's cloud in the contract.

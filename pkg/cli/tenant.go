@@ -8,6 +8,7 @@ import (
 
 	"github.com/yindia/cluster-vending/pkg/convert"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
+	"github.com/yindia/cluster-vending/pkg/kube"
 )
 
 func TenantCreate(ctx context.Context, c Clients, o Options) (proto.Message, error) {
@@ -21,6 +22,47 @@ func TenantCreate(ctx context.Context, c Clients, o Options) (proto.Message, err
 		return nil, err
 	}
 	return call(ctx, &cloudv1.CreateTenantRequest{TenantId: o.Tenant}, c.Tenant.CreateTenant)
+}
+
+// TenantDelete deletes the tenant (TenantService.DeleteTenant): refused,
+// naming them, while it has accounts, networks, clusters, components or
+// sub-tenants. Its namespace is unregistered and kept. --wait waits until
+// the tenant is no longer listed.
+func TenantDelete(ctx context.Context, c Clients, o Options) (proto.Message, error) {
+	if o.ID != "" {
+		if o.Tenant != "" && !o.tenantDefaulted && o.Tenant != o.ID {
+			return nil, fmt.Errorf("tenant ID and --tenant differ")
+		}
+		o.Tenant = o.ID
+	}
+	if err := o.requireTenant(); err != nil {
+		return nil, err
+	}
+	deleted, err := call(ctx, &cloudv1.DeleteTenantRequest{TenantId: o.Tenant}, c.Tenant.DeleteTenant)
+	if err != nil {
+		return nil, err
+	}
+	o.progressf("Deleting the tenant %s: its namespace %s is unregistered and kept\n", o.Tenant, kube.TenantNamespace(o.Tenant))
+	if !o.Wait {
+		return deleted, nil
+	}
+	err = poll(ctx, o, "the tenant "+o.Tenant, func() (bool, error) {
+		res, err := call(ctx, &cloudv1.ListTenantsRequest{}, c.Tenant.ListTenants)
+		if err != nil {
+			return false, err
+		}
+		for _, t := range res.(*cloudv1.ListTenantsResponse).GetTenants() {
+			if t.GetId() == o.Tenant {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	o.progressf("Tenant %s: deleted\n", o.Tenant)
+	return deleted, nil
 }
 
 func TenantList(ctx context.Context, c Clients, o Options) (proto.Message, error) {

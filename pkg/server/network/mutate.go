@@ -90,7 +90,7 @@ func (s *NetworkService) UpdateNetwork(ctx context.Context, req *cloudv1.UpdateN
 			return nil, connect.NewError(connect.CodeFailedPrecondition, "the plan is stale; the request or a resource changed; plan again")
 		}
 		if !plan.GetApplicable() {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, "the plan is not applicable: it changes an immutable field")
+			return nil, connect.NewError(connect.CodeFailedPrecondition, service.NotApplicable("it changes an immutable field", plan))
 		}
 	}
 	tagsChanged := changed.labels || changed.flowLogs

@@ -9,7 +9,7 @@
 #           audiences:
 #             - cv-api
 #           usernameClaim: preferred_username
-aws-management-role-arn: arn:aws:iam::642299167759:role/cluster-vending-provisioner
+aws-management-role-arn: arn:aws:iam::111122223333:role/cluster-vending-provisioner
 context: kind-cluster-vending
 http-addr: 127.0.0.1:8080
 log-format: text
@@ -93,3 +93,62 @@ nodeGroups:
     terminationGracePeriod: 1h
     disruptionBudget: 1             # nodes disrupted at once
     maxPods: 0                      # 0: Karpenter's default for the shape
+
+# How the Crossplane providers run: one DeploymentRuntimeConfig each
+# (cluster-vending-aws-<service>, cluster-vending-helm), server-side applied
+# by the controller on every start (--install-providers), so a change here
+# reaches the running providers; a field an operator set by hand under
+# another field manager is kept. defaults apply to every provider, an
+# override to one, field by field over the defaults. Without the section:
+# these values, the platform's (docs/architecture.md#provider-runtime).
+providers:
+  defaults:
+    # One active replica (leader election); 2 or more for hot standbys.
+    replicas: 1
+    # How often each resource is checked for drift.
+    poll: 10m
+    # Reconciles a second at most (AWS API throttling punishes more).
+    maxReconcileRate: 10
+    resources:
+      requests: {cpu: 200m, memory: 512Mi}
+      limits: {cpu: "1", memory: 1Gi}
+  overrides:
+    # Most resources and the largest schemas; EC2's change rarely. At most
+    # 30m: the network's observation bound is derived from it.
+    provider-aws-ec2:
+      poll: 30m
+      resources:
+        requests: {cpu: 500m, memory: 1Gi}
+        limits: {cpu: "2", memory: 2Gi}
+    provider-aws-eks:
+      resources:
+        requests: {cpu: 500m, memory: 1Gi}
+        limits: {cpu: "2", memory: 2Gi}
+    # A few resources per cluster each.
+    provider-aws-kms:
+      resources:
+        requests: {cpu: 50m, memory: 256Mi}
+        limits: {cpu: 500m, memory: 768Mi}
+    provider-aws-sqs:
+      resources:
+        requests: {cpu: 50m, memory: 256Mi}
+        limits: {cpu: 500m, memory: 768Mi}
+    provider-aws-cloudwatchevents:
+      resources:
+        requests: {cpu: 50m, memory: 256Mi}
+        limits: {cpu: 500m, memory: 768Mi}
+    provider-aws-cloudwatchlogs:
+      resources:
+        requests: {cpu: 50m, memory: 256Mi}
+        limits: {cpu: 500m, memory: 768Mi}
+    provider-aws-s3:
+      resources:
+        requests: {cpu: 50m, memory: 256Mi}
+        limits: {cpu: 500m, memory: 768Mi}
+    # Reads workload clusters only; spec changes reach it through its watch.
+    provider-helm:
+      poll: 10m
+      maxReconcileRate: 50
+      resources:
+        requests: {cpu: 100m, memory: 256Mi}
+        limits: {cpu: "1", memory: 1Gi}

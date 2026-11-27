@@ -155,8 +155,8 @@ func TestAddonsFollowTheDefaultNodePool(t *testing.T) {
 
 			got := addonConfigurations(t, p)
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("got  %v\nwant %v", got, tt.want)
+			if want := enforced(tt.want); !reflect.DeepEqual(got, want) {
+				t.Errorf("got  %v\nwant %v", got, want)
 			}
 		})
 	}
@@ -235,8 +235,8 @@ func TestAddonsOnTheSystemPool(t *testing.T) {
 
 			got := addonConfigurations(t, p)
 
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("got  %v\nwant %v", got, tt.want)
+			if want := enforced(tt.want); !reflect.DeepEqual(got, want) {
+				t.Errorf("got  %v\nwant %v", got, want)
 			}
 		})
 	}

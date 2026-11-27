@@ -44,7 +44,12 @@ type componentAPI struct {
 
 func (a *componentAPI) ListComponentDefinitions(_ context.Context, req *cloudv1.ListComponentDefinitionsRequest) (*cloudv1.ListComponentDefinitionsResponse, error) {
 	policies := &cloudv1.ComponentDefinition{Name: "policies", Description: "Pod security\npolicies.", Requires: []string{"kyverno"},
-		Configurable: true, Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_TENANT, Provider: cloudv1.CloudProvider_CLOUD_PROVIDER_AWS}
+		Configurable: true, Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_TENANT, Provider: cloudv1.CloudProvider_CLOUD_PROVIDER_AWS,
+		CloudResources: &cloudv1.ComponentCloudResources{IamRole: &cloudv1.ComponentIamRole{
+			Access:          cloudv1.ComponentIamAccess_COMPONENT_IAM_ACCESS_POD_IDENTITY,
+			ServiceAccounts: []*cloudv1.ComponentServiceAccount{{Namespace: "kyverno", Name: "reports"}},
+			Policy:          `{"Version":"2012-10-17","Statement":[]}`,
+		}}}
 	karpenter := &cloudv1.ComponentDefinition{Name: "karpenter", Description: "Node autoscaling.",
 		Management: cloudv1.ComponentManagement_COMPONENT_MANAGEMENT_PLATFORM, Provider: cloudv1.CloudProvider_CLOUD_PROVIDER_AWS}
 	if req.GetClusterId() != "" {
@@ -145,13 +150,13 @@ func TestComponentCatalogTable(t *testing.T) {
 		want string
 	}{
 		{"the catalog", Options{Tenant: "acme"},
-			"NAME        PROVIDER   MANAGED BY   CONFIGURABLE   REQUIRES   DESCRIPTION\n" +
-				"karpenter   aws        platform     no             <none>     Node autoscaling.\n" +
-				"policies    aws        tenant       yes            kyverno    Pod security policies.\n"},
+			"NAME        PROVIDER   MANAGED BY   CONFIGURABLE   IAM ROLE                         REQUIRES   DESCRIPTION\n" +
+				"karpenter   aws        platform     no             <none>                           <none>     Node autoscaling.\n" +
+				"policies    aws        tenant       yes            pod-identity (kyverno/reports)   kyverno    Pod security policies.\n"},
 		{"with a cluster's versions", Options{Tenant: "acme", Cluster: componentCluster},
-			"NAME        PROVIDER   MANAGED BY   CONFIGURABLE   VERSION   REQUIRES   DESCRIPTION\n" +
-				"karpenter   aws        platform     no             1.15.1    <none>     Node autoscaling.\n" +
-				"policies    aws        tenant       yes            3.10.0    kyverno    Pod security policies.\n"},
+			"NAME        PROVIDER   MANAGED BY   CONFIGURABLE   IAM ROLE                         VERSION   REQUIRES   DESCRIPTION\n" +
+				"karpenter   aws        platform     no             <none>                           1.15.1    <none>     Node autoscaling.\n" +
+				"policies    aws        tenant       yes            pod-identity (kyverno/reports)   3.10.0    kyverno    Pod security policies.\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -410,6 +415,22 @@ func TestComponentListDetailsSayHowHelmStands(t *testing.T) {
 		"  last recovery: rolled back to revision 14\n"} {
 		if err != nil || !strings.Contains(out.String(), want) {
 			t.Errorf("got %v\n%s\nwant it to contain %q", err, out.String(), want)
+		}
+	}
+}
+
+// component get (table) shows the IAM role the platform creates for the
+// component, from its cluster's catalog.
+func TestComponentGetShowsTheIAMRole(t *testing.T) {
+	var out bytes.Buffer
+	err := Run(t.Context(), ComponentGet, Clients{Component: &componentAPI{component: stored(t, nil)}},
+		Options{Tenant: "acme", ID: componentID}, &out, OutputTable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"IAM Role:", "Access:", "pod-identity", "kyverno/reports", `"Version": "2012-10-17"`} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
 	}
 }

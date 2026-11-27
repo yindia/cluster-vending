@@ -158,9 +158,13 @@ The full list with comments is [values.yaml](values.yaml), and
 (`--config`), so they cannot disagree. Both pods carry a checksum of it and
 restart when it changes. `aws.*` values are added to it as flat keys
 (`aws-management-role-arn`, ...). Keys are the commands' flag names plus the
-`auth`, `naas` and `nodeGroups` sections ([docs/architecture.md, section
-5](../../docs/architecture.md#5-configuration)). The live reader reads none
-of it.
+`auth`, `naas`, `nodeGroups` and `providers` sections ([docs/architecture.md, section
+5](../../docs/architecture.md#5-configuration)). `platform.providers` tunes the
+Crossplane providers (replicas, poll, reconcile rate, resources; defaults and
+per-provider overrides); the controller applies it on every start
+([provider runtime](../../docs/architecture.md#provider-runtime)). Controller
+throughput settings are flat keys too: `scan-workers` (4), `kube-qps` (50),
+`kube-burst` (100). The live reader reads none of it.
 
 Never put a secret in `platform`: Secrets are referenced by name, e.g.
 `provider-credentials-secret: crossplane-system/aws-local-credentials`.

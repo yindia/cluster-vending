@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	awsevents "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchevents/v1beta1"
 	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -130,14 +131,14 @@ func TestDeleteClocksArePrunedOnEveryExit(t *testing.T) {
 		"not reachable": func() { s.deleteNodeGroups(t.Context(), row, &clusterRemoval{}, false) },
 		"no teardowns":  func() { s.deleteNodeGroups(t.Context(), row, &clusterRemoval{}, true) },
 	} {
-		nodeStageErrors.Store(row.ID, time.Now())
+		nodeStageErrors.Store(row.ID, &cloudv1.ClusterTeardown{StartTime: timestamppb.Now()})
 		run()
 		_, left := nodeStageErrors.Load(row.ID)
 		require.False(t, left, name)
 	}
 
 	d := newDelOrder(t)
-	nodeStageErrors.Store(d.row.ID, time.Now())
+	nodeStageErrors.Store(d.row.ID, &cloudv1.ClusterTeardown{StartTime: timestamppb.Now()})
 	apiDownSince.Store(d.row.ID, time.Now())
 	d.run(80)
 	require.True(t, d.gone())

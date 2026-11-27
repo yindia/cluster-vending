@@ -32,7 +32,8 @@ func TestLoadController(t *testing.T) {
 	// The management account is the role's.
 	want := config.Controller{MetricsAddr: "0", ProbeAddr: ":8081", LeaderElect: true, LeaseNamespace: config.DefaultLeaseNamespace,
 		InstallProviders: true, InstallCatalog: true, RecoverStuckReleases: true, Recommendations: true,
-		ReconcileWorkers: config.DefaultReconcileWorkers, UpgradeTimeout: config.DefaultUpgradeTimeout,
+		ReconcileWorkers: config.DefaultReconcileWorkers, ScanWorkers: config.DefaultScanWorkers,
+		KubeQPS: config.DefaultKubeQPS, KubeBurst: config.DefaultKubeBurst, UpgradeTimeout: config.DefaultUpgradeTimeout,
 		TeardownTimeout: config.DefaultTeardownTimeout, HelmBackoffMax: config.DefaultHelmBackoffMax, HelmMaxFailures: config.DefaultHelmMaxFailures,
 		NodeGroups: config.DefaultNodeGroups(),
 		AWS:        config.AWS{ManagementAccountID: "111122223333", ManagementRoleARN: managementRole}}
@@ -74,6 +75,12 @@ func TestLoadController(t *testing.T) {
 		"failures zero":   {config.FlagHelmMaxFailures: "0"},
 		"failures word":   {config.FlagHelmMaxFailures: "many"},
 		"teardown zero":   {config.FlagTeardownTimeout: "0s"},
+		"scan workers 0":  {config.FlagScanWorkers: "0"},
+		"scan workers":    {config.FlagScanWorkers: "a few"},
+		"qps zero":        {config.FlagKubeQPS: "0"},
+		"qps word":        {config.FlagKubeQPS: "fast"},
+		"burst zero":      {config.FlagKubeBurst: "0"},
+		"burst below qps": {config.FlagKubeQPS: "80", config.FlagKubeBurst: "40"},
 	} {
 		if _, err := config.LoadController(lookupIn(flags), lookupIn(management(nil)), nil); err == nil || !strings.Contains(err.Error(), "--") {
 			t.Errorf("%s: %v, want an error naming the flag", name, err)
@@ -140,7 +147,8 @@ func TestControllerSettingsAreFew(t *testing.T) {
 	want := []string{config.FlagConfig, config.FlagMetricsAddr, config.FlagProbeAddr, config.FlagLeaderElect,
 		config.FlagLeaseNamespace, config.FlagServiceAccount, config.FlagAWSManagementRoleARN, config.FlagInstallProviders,
 		config.FlagInstallCatalog, config.FlagRecoverStuckReleases, config.FlagHelmBackoffMax, config.FlagHelmMaxFailures, config.FlagRecommendations,
-		config.FlagReconcileWorkers, config.FlagAutomaticUpgrades, config.FlagUpgradeTimeout, config.FlagTeardownTimeout,
+		config.FlagReconcileWorkers, config.FlagScanWorkers, config.FlagKubeQPS, config.FlagKubeBurst,
+		config.FlagAutomaticUpgrades, config.FlagUpgradeTimeout, config.FlagTeardownTimeout,
 		config.FlagProviderCredentialsSecret,
 		config.FlagSkipTenantRole, config.FlagAWSRegion, config.FlagAWSSourceRoleARN, config.FlagAWSExternalID,
 		config.FlagSystemInstanceTypes, config.FlagSystemNodeGroupInstanceType, config.FlagSystemNodeGroupSize, config.FlagSystemNodeGroupMinSize, config.FlagSystemNodeGroupMaxSize, config.FlagSystemNodeGroupCapacityType, config.FlagSystemNodeGroupAMIType,
@@ -211,5 +219,19 @@ func TestHelmSettings(t *testing.T) {
 	}
 	if config.DefaultHelmBackoffMax != 30*time.Minute || config.DefaultHelmMaxFailures != 5 {
 		t.Error("the defaults are the design's: 30m and 5")
+	}
+}
+
+// The scanners' workers and the management client's rate limits come from
+// a flag, a variable or the platform file like every setting.
+func TestLoadControllerScanWorkersAndRateLimits(t *testing.T) {
+	cfg, err := config.LoadController(lookupIn(map[string]string{config.FlagScanWorkers: "2"}),
+		lookupIn(management(map[string]string{config.EnvKubeQPS: "120.5"})),
+		lookupIn(map[string]string{config.FlagKubeBurst: "300"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ScanWorkers != 2 || cfg.KubeQPS != 120.5 || cfg.KubeBurst != 300 {
+		t.Errorf("scan workers %d, QPS %v, burst %d", cfg.ScanWorkers, cfg.KubeQPS, cfg.KubeBurst)
 	}
 }

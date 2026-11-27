@@ -88,7 +88,14 @@ type Options struct {
 	Reason          string
 	ResetExceptions bool
 	Platform        bool
-	// Channel and Tier reject obsolete scoped freeze options.
+	// NoSelfAdmin is --no-self-admin of cluster create: do not add the
+	// caller's IAM principal to spec.access.adminPrincipals.
+	NoSelfAdmin bool
+	// CallerPrincipal finds that principal; nil: the default AWS
+	// credential chain (tests set it).
+	CallerPrincipal CallerPrincipal
+	// Channel is --channel of cluster versions; on a freeze, Channel and
+	// Tier reject obsolete scoped freeze options.
 	Channel, Tier string
 	// Until is --until of admin freeze.
 	Until string
@@ -161,7 +168,7 @@ type Options struct {
 	// KubeconfigFile is --kubeconfig-file of cluster kubeconfig: the file
 	// the AWS CLI writes to. Empty: its default (~/.kube/config).
 	KubeconfigFile string
-	// Component is the argument of component enable and component values:
+	// Component is the argument of component enable and component template:
 	// the catalog name.
 	Component string
 	// ValidateOnly is --validate-only of component enable and update:

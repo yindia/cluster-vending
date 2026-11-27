@@ -50,8 +50,11 @@ type AddonEntry struct {
 	Name      string             `json:"name"`
 	Default   bool               `json:"default,omitempty"`
 	Placement *AddonPlacementDoc `json:"placement,omitempty"`
-	Schema    *AddonSchemaDoc    `json:"schema,omitempty"`
-	Setup     *AddonSetupDoc     `json:"setup,omitempty"`
+	// Configuration are configurationValues keys the platform sets on every
+	// cluster, over the tenant's (addon_configuration.go).
+	Configuration map[string]any  `json:"configuration,omitempty"`
+	Schema        *AddonSchemaDoc `json:"schema,omitempty"`
+	Setup         *AddonSetupDoc  `json:"setup,omitempty"`
 }
 
 // AddonPlacementDoc is where an add-on's configuration places its
@@ -84,6 +87,8 @@ type AddonCatalog struct {
 	entries    []AddonEntry
 	placements map[string]addonPlacement
 	setups     map[string]addonSetup
+	// configurations are the enforced configurationValues keys by add-on.
+	configurations map[string]map[string]any
 }
 
 // Names are the catalog's add-ons, in its order.
@@ -152,7 +157,8 @@ func ParseAddonCatalog(raw []byte) (AddonCatalog, error) {
 	if err := yaml.UnmarshalStrict(raw, &doc); err != nil {
 		return AddonCatalog{}, fmt.Errorf("addons.yaml: %w", err)
 	}
-	c := AddonCatalog{entries: doc.Addons, placements: map[string]addonPlacement{}, setups: map[string]addonSetup{}}
+	c := AddonCatalog{entries: doc.Addons, placements: map[string]addonPlacement{}, setups: map[string]addonSetup{},
+		configurations: map[string]map[string]any{}}
 	if len(doc.Addons) == 0 {
 		return AddonCatalog{}, errors.New("addons.yaml: no add-ons")
 	}
@@ -166,6 +172,9 @@ func ParseAddonCatalog(raw []byte) (AddonCatalog, error) {
 		}
 		seen[e.Name] = true
 		if err := c.addPlacement(e); err != nil {
+			return AddonCatalog{}, fmt.Errorf("addons.yaml: %s: %w", e.Name, err)
+		}
+		if err := c.addConfiguration(e); err != nil {
 			return AddonCatalog{}, fmt.Errorf("addons.yaml: %s: %w", e.Name, err)
 		}
 		if err := c.addSetup(e, shorts); err != nil {
@@ -204,6 +213,23 @@ func (c AddonCatalog) addPlacement(e AddonEntry) error {
 		placement.paths = append(placement.paths, keys)
 	}
 	c.placements[e.Name] = placement
+	return nil
+}
+
+// addConfiguration keeps the entry's enforced configuration keys. Like a
+// placement's, they need the schema they were confirmed in: EKS refuses a
+// key its schema lacks.
+func (c AddonCatalog) addConfiguration(e AddonEntry) error {
+	if e.Configuration == nil {
+		return nil
+	}
+	if len(e.Configuration) == 0 {
+		return errors.New("configuration is empty")
+	}
+	if e.Schema == nil || e.Schema.Version == "" || e.Schema.Source == "" {
+		return errors.New("configuration needs schema.version and schema.source: where its keys were confirmed")
+	}
+	c.configurations[e.Name] = e.Configuration
 	return nil
 }
 

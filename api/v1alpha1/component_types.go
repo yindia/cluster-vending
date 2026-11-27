@@ -510,7 +510,7 @@ type ComponentDefinitionSpec struct {
 	// +optional
 	Sizing *ComponentSizing `json:"sizing,omitempty"`
 	// userValues is the starting values file tenants pull (cluster-vending
-	// component values <name>), edit and send with enable/update; only keys
+	// component template <name>), edit and send with enable/update; only keys
 	// a tenant may change. YAML kept as written, so the platform team's
 	// comments survive as they do in a chart's values.yaml. The definition
 	// is Valid only when it parses into an object, shares no path with

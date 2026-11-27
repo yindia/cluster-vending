@@ -42,6 +42,7 @@ const (
 //	Cluster       UpgradeStarted              Normal   a Kubernetes upgrade began (control plane first)
 //	Cluster       UpgradeNodes                Normal   the control plane runs the new version; the node groups, then the add-ons, follow
 //	Cluster       UpgradeFinished             Normal   control plane, node groups and add-ons run the new version
+//	Cluster       ControlPlaneUpgradedByAWS   Warning  EKS runs a newer minor than the spec (AWS upgraded it by force); the spec follows it
 //	Cluster       PlatformComponentInstalling Normal   a platform component's charts are being installed
 //	Cluster       PlatformComponentReady      Normal   a platform component is installed
 //	Cluster       PlatformComponentFailed     Warning  a platform component failed: chart, Helm state, last error
@@ -93,6 +94,7 @@ const (
 	ReasonTakenOver                   = "TakenOver"
 	ReasonUpgradeStarted              = "UpgradeStarted"
 	ReasonUpgradeNodes                = "UpgradeNodes"
+	ReasonControlPlaneUpgradedByAWS   = "ControlPlaneUpgradedByAWS"
 	ReasonUpgradeStep                 = "UpgradeStep"
 	ReasonAddonRecovering             = "AddonRecovering"
 	ReasonAddonInstalling             = "AddonInstalling"

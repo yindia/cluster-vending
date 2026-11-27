@@ -24,9 +24,33 @@ import (
 	"github.com/yindia/cluster-vending/pkg/naas"
 )
 
+// enforcingVPCCNI is the parent cluster's vpc-cni add-on, Ready and
+// Synced, with NetworkPolicy enforcement as EKS reports it.
+func enforcingVPCCNI(t *testing.T, w *stWorld) *awseks.Addon {
+	t.Helper()
+	values := `{"enableNetworkPolicy":"true","nodeAgent":{"enabled":true}}`
+	addon := &awseks.Addon{ObjectMeta: metav1.ObjectMeta{Name: "prod-addon-vpc-cni", Namespace: w.parent(t).Namespace, Labels: crossplane.ClusterLabels("acme", stClusterID)},
+		Spec:   awseks.AddonSpec{ForProvider: awseks.AddonParameters{AddonName: ptr.To("vpc-cni"), ConfigurationValues: ptr.To(values)}},
+		Status: awseks.AddonStatus{AtProvider: awseks.AddonObservation{AddonName: ptr.To("vpc-cni"), ConfigurationValues: ptr.To(values)}}}
+	addon.SetConditions(xpv2.Available(), xpv2.ReconcileSuccess())
+	return addon
+}
+
 func provisionAccessWorld(t *testing.T, configured bool) *stWorld {
 	t.Helper()
+	return provisionAccessWorldWith(t, configured, func(a *awseks.Addon) *awseks.Addon { return a })
+}
+
+// provisionAccessWorldWith is provisionAccessWorld with the parent's
+// vpc-cni add-on as vpcCNI makes it (nil: none).
+func provisionAccessWorldWith(t *testing.T, configured bool, vpcCNI func(*awseks.Addon) *awseks.Addon) *stWorld {
+	t.Helper()
 	w := newSubTenantWorld(t)
+	if addon := vpcCNI(enforcingVPCCNI(t, w)); addon != nil {
+		if err := w.management.Create(t.Context(), addon); err != nil {
+			t.Fatal(err)
+		}
+	}
 	w.deps.NaaS = config.NaaS{AllowedGroups: []string{"Admins", "Read*"}}
 	parent := w.parent(t)
 	parent.Spec.Region = "us-east-1"
@@ -200,6 +224,65 @@ func TestSubTenantAccessOpensWithoutFlapping(t *testing.T) {
 	w.pass(t)
 	if !meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "AccessReady") || len(w.writes) != writes {
 		t.Fatal("display name or maintenance window edit unnecessarily revoked access")
+	}
+}
+
+// Access opens only once the cluster enforces NetworkPolicy: the
+// sub-tenant's deny-by-default policies isolate nothing before.
+func TestSubTenantAccessWaitsForNetworkPolicyEnforcement(t *testing.T) {
+	w := provisionAccessWorldWith(t, true, func(a *awseks.Addon) *awseks.Addon {
+		a.Status.AtProvider.ConfigurationValues = nil // asked for, EKS not there yet
+		return a
+	})
+	condition := meta.FindStatusCondition(w.sub(t).Status.Conditions, "AccessReady")
+	policy := meta.FindStatusCondition(w.sub(t).Status.Conditions, "NetworkPolicyReady")
+	if condition == nil || condition.Status != metav1.ConditionFalse || condition.Reason != "NetworkPolicyPending" ||
+		policy == nil || policy.Status != metav1.ConditionFalse || w.tenant(t).GetLabels()[naas.LabelAccessReady] != "false" {
+		t.Fatalf("access opened before NetworkPolicy enforcement: %+v", w.sub(t).Status.Conditions)
+	}
+
+	addon := &awseks.Addon{}
+	if err := w.management.Get(t.Context(), client.ObjectKey{Namespace: w.parent(t).Namespace, Name: "prod-addon-vpc-cni"}, addon); err != nil {
+		t.Fatal(err)
+	}
+	addon.Status.AtProvider.ConfigurationValues = addon.Spec.ForProvider.ConfigurationValues
+	if err := w.management.Update(t.Context(), addon); err != nil { // no status subresource in the fake
+		t.Fatal(err)
+	}
+	w.pass(t)
+
+	if !meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "NetworkPolicyReady") || w.tenant(t).GetLabels()[naas.LabelAccessReady] != "true" {
+		t.Fatalf("access did not open once NetworkPolicy was enforced: %+v", w.sub(t).Status.Conditions)
+	}
+}
+
+// Access already open stays open while the vpc-cni add-on is updated (or
+// before an older render gains enforcement): AccessReady reports the wait,
+// the gate is not pulled and the sub-tenant does not go Degraded.
+func TestSubTenantOpenAccessSurvivesAVPCCNIUpdate(t *testing.T) {
+	w := provisionAccessWorld(t, true)
+	materializeAccessBindings(t, w)
+	w.pass(t)
+	if !meta.IsStatusConditionTrue(w.sub(t).Status.Conditions, "AccessReady") {
+		t.Fatalf("access not open: %+v", w.sub(t).Status)
+	}
+	addon := &awseks.Addon{}
+	if err := w.management.Get(t.Context(), client.ObjectKey{Namespace: w.parent(t).Namespace, Name: "prod-addon-vpc-cni"}, addon); err != nil {
+		t.Fatal(err)
+	}
+	addon.SetConditions(xpv2.Creating())
+	if err := w.management.Update(t.Context(), addon); err != nil { // no status subresource in the fake
+		t.Fatal(err)
+	}
+
+	w.pass(t)
+
+	sub := w.sub(t)
+	condition := meta.FindStatusCondition(sub.Status.Conditions, "AccessReady")
+	if condition.Status != metav1.ConditionFalse || condition.Reason != "NetworkPolicyPending" ||
+		w.tenant(t).GetLabels()[naas.LabelAccessReady] != "true" || sub.Status.State != cloud.SubTenantStateReady {
+		t.Fatalf("a vpc-cni update revoked open access or went unreported: state %s, %+v, gate %s",
+			sub.Status.State, condition, w.tenant(t).GetLabels()[naas.LabelAccessReady])
 	}
 }
 

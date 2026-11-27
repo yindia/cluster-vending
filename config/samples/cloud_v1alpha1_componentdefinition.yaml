@@ -118,7 +118,7 @@ spec:
     controller:
       resources:
         requests: {cpu: 250m, memory: 512Mi}
-  # The file tenants pull (cluster-vending component values karpenter),
+  # The file tenants pull (cluster-vending component template karpenter),
   # edit and send back. Comments stay; keys left as they are here are not
   # stored, so a later change to this file reaches those tenants.
   userValues: |

@@ -1,7 +1,12 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
 	"io"
+	"strings"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
@@ -44,4 +49,77 @@ func describeComponent(w io.Writer, c *cloudv1.Component) error {
 		return err
 	}
 	return section(w, "Conditions", conditionHeader, conditionRows(st.GetConditions()))
+}
+
+// iamRoleSummary is the catalog's IAM ROLE column: how the pods get the
+// role and which service accounts may use it; <none> for no role.
+func iamRoleSummary(r *cloudv1.ComponentIamRole) string {
+	if r == nil {
+		return none
+	}
+	return iamAccess(r.GetAccess()) + " (" + strings.Join(serviceAccounts(r), ", ") + ")"
+}
+
+func iamAccess(a cloudv1.ComponentIamAccess) string {
+	if a == cloudv1.ComponentIamAccess_COMPONENT_IAM_ACCESS_POD_IDENTITY {
+		return "pod-identity"
+	}
+	return "irsa"
+}
+
+func serviceAccounts(r *cloudv1.ComponentIamRole) []string {
+	out := make([]string, 0, len(r.GetServiceAccounts()))
+	for _, sa := range r.GetServiceAccounts() {
+		out = append(out, sa.GetNamespace()+"/"+sa.GetName())
+	}
+	return out
+}
+
+// componentIAMRole is component get's IAM Role section: the role the
+// platform creates in the tenant's account for the component, from the
+// catalog entry of the component's cluster.
+func componentIAMRole(ctx context.Context, c Clients, o Options, comp *cloudv1.Component) error {
+	res, err := call(ctx, &cloudv1.ListComponentDefinitionsRequest{TenantId: o.Tenant, ClusterId: comp.GetClusterId()},
+		c.Component.ListComponentDefinitions)
+	if err != nil {
+		_, werr := fmt.Fprintf(o.Out, "\nIAM Role:\n  unknown: the catalog cannot be read: %v\n", err)
+		return werr
+	}
+	var role *cloudv1.ComponentIamRole
+	for _, d := range res.(*cloudv1.ListComponentDefinitionsResponse).GetDefinitions() {
+		if d.GetName() == comp.GetComponent() {
+			role = d.GetCloudResources().GetIamRole()
+		}
+	}
+	return describeIAMRole(o.Out, role)
+}
+
+// describeIAMRole writes the IAM Role section: access, service accounts,
+// managed policies and the policy document (placeholders as the
+// definition has them).
+func describeIAMRole(w io.Writer, r *cloudv1.ComponentIamRole) error {
+	if _, err := fmt.Fprintln(w, "\nIAM Role:"); err != nil {
+		return err
+	}
+	indented := &prefixWriter{w: w, prefix: "  "}
+	if r == nil {
+		_, err := fmt.Fprintln(indented, "none: the platform creates no IAM role for this component")
+		return err
+	}
+	if err := fields(indented, [][2]string{
+		{"Access", iamAccess(r.GetAccess())}, {"Service Accounts", strings.Join(serviceAccounts(r), ", ")},
+		{"Managed Policies", strings.Join(r.GetManagedPolicyArns(), ", ")},
+	}); err != nil {
+		return err
+	}
+	if r.GetPolicy() == "" {
+		return nil
+	}
+	policy := r.GetPolicy()
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, []byte(policy), "  ", "  ") == nil {
+		policy = pretty.String()
+	}
+	_, err := fmt.Fprintf(indented, "Policy:\n  %s\n", policy)
+	return err
 }

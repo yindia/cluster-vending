@@ -2,6 +2,7 @@ package controller
 
 import (
 	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/buildserial"
 )
 
 // The shipped release is named after its content: a build that ships other
@@ -49,6 +51,19 @@ func TestShippedReleaseNameFollowsItsContent(t *testing.T) {
 	}
 	if rel := DefaultRelease(); rel.Name != DefaultReleaseName || rel.Labels[cloudv1alpha1.LabelShipped] != "true" {
 		t.Errorf("DefaultRelease is %q with labels %v", rel.Name, rel.Labels)
+	}
+}
+
+// newerBuild is rel as a newer build shipped it: stamped with its serial.
+func newerBuild(rel *cloudv1alpha1.Release) *cloudv1alpha1.Release {
+	rel.Annotations = map[string]string{buildserial.Annotation: strconv.FormatInt(buildserial.Serial+1, 10)}
+	return rel
+}
+
+// The shipped release is stamped with the build's serial.
+func TestShippedReleaseCarriesTheSerial(t *testing.T) {
+	if got := buildserial.Of(DefaultRelease().Annotations); got != buildserial.Serial {
+		t.Fatalf("serial %d, want %d", got, buildserial.Serial)
 	}
 }
 
@@ -115,6 +130,9 @@ func TestShippedReleaseTakesOverAlpha(t *testing.T) {
 		{name: "alpha with a rollout policy of the operator", objects: []client.Object{release(old, true, ""), alpha(ownPolicy)}, want: old, kept: old},
 		{name: "alpha names a release that is gone", objects: []client.Object{alpha(pinned(old))}, want: old},
 		{name: "alpha already on this build's release", objects: []client.Object{alpha(pinned(DefaultReleaseName))}, want: DefaultReleaseName},
+		// An older build (a rollback, an old pod) never moves alpha back.
+		{name: "alpha on a newer build's release", objects: []client.Object{newerBuild(release(old, true, "")), alpha(pinned(old))},
+			want: old, kept: old},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

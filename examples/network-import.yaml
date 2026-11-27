@@ -5,7 +5,7 @@
 #   cluster-vending network import -f examples/network-import.yaml [--wait]
 #   cluster-vending network takeover IMPORTED_NETWORK_ID --tenant acme [--wait]
 #
-# Replace spec.bootstrapId with the BOOTSTRAP_ID that `bootstrap create -f
+# Replace spec.bootstrapId with the BOOTSTRAP_ID that `account create -f
 # examples/cloudaccount.yaml` returned, and the VPC and subnet IDs with
 # yours (these are AWS's documentation placeholders). The answer has the
 # imported network's id: the IMPORTED_NETWORK_ID that takeover and

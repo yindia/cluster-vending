@@ -71,15 +71,14 @@ func TestPlanNodeGroups(t *testing.T) {
 		objs        []reconcile.WorkloadObject
 		wantDelete  []reconcile.WorkloadObject
 		wantMessage string
-		wantSince   time.Time
 	}{
 		{name: "nothing: done"},
 		{name: "a load balancer is not its business", objs: []reconcile.WorkloadObject{obj(reconcile.KindService, "ns", "lb", false)}},
 		{name: "the pools first, an old platform pool with them; claims and classes wait",
 			objs:       []reconcile.WorkloadObject{class, claim, platformPool, user},
 			wantDelete: []reconcile.WorkloadObject{user, platformPool}, wantMessage: "deleting the node pools and waiting for Karpenter to terminate their nodes (NodePool gpu, NodePool platform)"},
-		{name: "a pool being deleted is waited for since its request",
-			objs: []reconcile.WorkloadObject{deleting}, wantSince: at,
+		{name: "a pool being deleted is waited for, not deleted again",
+			objs:        []reconcile.WorkloadObject{deleting},
 			wantMessage: "deleting the node pools and waiting for Karpenter to terminate their nodes (NodePool gpu)"},
 		{name: "then what nodes are left",
 			objs:        []reconcile.WorkloadObject{class, claim},
@@ -92,8 +91,8 @@ func TestPlanNodeGroups(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := planTeardown(nodeGroupStages, tt.objs)
 
-			if !reflect.DeepEqual(got.delete, tt.wantDelete) || got.message != tt.wantMessage || !got.since.Equal(tt.wantSince) {
-				t.Errorf("delete %v message %q since %v, want %v %q %v", got.delete, got.message, got.since, tt.wantDelete, tt.wantMessage, tt.wantSince)
+			if !reflect.DeepEqual(got.delete, tt.wantDelete) || got.message != tt.wantMessage {
+				t.Errorf("delete %v message %q, want %v %q", got.delete, got.message, tt.wantDelete, tt.wantMessage)
 			}
 		})
 	}

@@ -1,9 +1,9 @@
 # Step 1 of the walkthrough (README.md): onboard tenant acme's AWS account.
 #
-#   cluster-vending bootstrap create -f examples/cloudaccount.yaml
+#   cluster-vending account create -f examples/cloudaccount.yaml
 #
 # The answer has the account's id: the BOOTSTRAP_ID the network manifests
-# refer to (spec.bootstrapId). `bootstrap list --tenant acme` shows it too.
+# refer to (spec.bootstrapId). `account list --tenant acme` shows it too.
 #
 # Placeholders: 111122223333 is AWS's documentation account ID; replace it
 # and the role with your own.
@@ -14,5 +14,5 @@ metadata:
   tenant: acme
 spec:
   aws:
-    accountId: "642299167759"
+    accountId: "111122223333"
     role: cluster-vending-provisioner   # role in the account that trusts the platform

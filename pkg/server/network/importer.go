@@ -155,7 +155,7 @@ func takeOverAllowed(row *model.Network, req *cloudv1.TakeOverNetworkRequest) (*
 	}
 	imp := netreconcile.StoredImport(row)
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("import phase is %s, want PLANNED", imp.GetPhase()))
+		return nil, service.ImportNotPlanned("network", row.ID, imp, lookupError(row))
 	}
 	notImported := corenetwork.ImportPlan{Lines: imp.GetResources()}.NotImported()
 	if len(notImported) > 0 && !req.GetAcknowledgeNotImported() {
@@ -187,4 +187,17 @@ func (s *NetworkService) refuseOwnedVPC(ctx context.Context, a *model.CloudAccou
 		}
 	}
 	return nil
+}
+
+// lookupError is the stored status message of a network whose import
+// lookup failed (state FAILED); empty otherwise.
+func lookupError(row *model.Network) string {
+	st := &cloudv1.NetworkStatus{}
+	if len(row.Status) == 0 || netreconcile.Lenient.Unmarshal(row.Status, st) != nil {
+		return ""
+	}
+	if st.GetState() != cloudv1.NetworkState_NETWORK_STATE_FAILED {
+		return ""
+	}
+	return st.GetMessage()
 }

@@ -1,10 +1,7 @@
 package aws
 
 import (
-	"encoding/json"
 	"slices"
-
-	"sigs.k8s.io/yaml"
 )
 
 // addonPlacement is how an add-on's configuration places its controller
@@ -50,33 +47,28 @@ func TolerationsOf(taints []TaintPlan) []map[string]any {
 	return out
 }
 
-// placedConfiguration is the add-on's configurationValues with the default
-// node pool's placement added (placement in addons.yaml). It is the tenant's
-// configuration as it is when the pool has neither labels nor taints, for
-// an add-on that is not placed, for an imported cluster (its add-ons stay
-// where they run) and when the configuration is not a JSON or YAML
-// object (EKS reports that). A nodeSelector or tolerations the tenant set
-// wins: only missing keys are added.
-func (b clusterBuilder) placedConfiguration(a AddonPlan) string {
-	pool := b.p.NodePool
+// placeable is the add-on's placement when it applies to this cluster:
+// the add-on is placed, the cluster is not imported (its add-ons stay where
+// they run) and the default node pool has labels or taints.
+func (b clusterBuilder) placeable(a AddonPlan) (addonPlacement, bool) {
 	placement, ok := addonCatalog.placements[a.Name]
 	if !ok || len(b.p.ExternalNames) > 0 {
-		return a.ConfigurationValues
+		return addonPlacement{}, false
 	}
-	labels, taints := pool.Labels, pool.Taints
-	if len(labels) == 0 && len(taints) == 0 {
-		return a.ConfigurationValues
-	}
-	values := map[string]any{}
-	if a.ConfigurationValues != "" {
-		if err := yaml.Unmarshal([]byte(a.ConfigurationValues), &values); err != nil || values == nil {
-			return a.ConfigurationValues
-		}
-	}
+	pool := b.p.NodePool
+	return placement, len(pool.Labels) > 0 || len(pool.Taints) > 0
+}
+
+// place adds the default node pool's placement to values (placement in
+// addons.yaml). A nodeSelector or tolerations the tenant set wins: only
+// missing keys are added. False when a path holds something other than an
+// object.
+func (b clusterBuilder) place(values map[string]any, placement addonPlacement) bool {
+	labels, taints := b.p.NodePool.Labels, b.p.NodePool.Taints
 	for _, path := range placement.paths {
 		target, ok := objectAt(values, path)
 		if !ok {
-			return a.ConfigurationValues
+			return false
 		}
 		if _, set := target["nodeSelector"]; !set && len(labels) > 0 {
 			target["nodeSelector"] = labels
@@ -85,11 +77,7 @@ func (b clusterBuilder) placedConfiguration(a AddonPlan) string {
 			target["tolerations"] = slices.Concat(TolerationsOf(taints), placement.defaultTolerations)
 		}
 	}
-	out, err := json.Marshal(values) // keys sorted: the same plan renders the same string
-	if err != nil {
-		return a.ConfigurationValues
-	}
-	return string(out)
+	return true
 }
 
 // objectAt is the object of values at path, made when missing; false when

@@ -19,8 +19,16 @@ import (
 	"github.com/yindia/cluster-vending/pkg/naas"
 )
 
-// The SubTenant access conditions (PROP-05 6.9).
-const conditionGroupsAllowed = "GroupsAllowed"
+// The SubTenant access conditions (PROP-05 6.9). NetworkPolicyReady: the
+// parent cluster enforces NetworkPolicy (its vpc-cni add-on), without
+// which the sub-tenant's isolation policies hold nothing.
+const (
+	conditionGroupsAllowed      = "GroupsAllowed"
+	conditionNetworkPolicyReady = "NetworkPolicyReady"
+)
+
+// subTenantAccessGates are the access conditions in the order they pass.
+var subTenantAccessGates = []string{conditionGroupsAllowed, "OIDCReady", conditionNetworkPolicyReady}
 
 // subTenantRetiredConditions are conditions of the removed qualification
 // gate; every pass drops them from the status.
@@ -104,8 +112,7 @@ type subTenantAccessInput struct {
 // closeAccess reports access closed for reason on every access condition
 // from GroupsAllowed on that has not passed yet.
 func closeAccess(st *cloud.SubTenantStatus, generation int64, from, reason, message string) {
-	conditions := []string{conditionGroupsAllowed, "OIDCReady"}
-	for _, kind := range conditions[indexOf(conditions, from):] {
+	for _, kind := range subTenantAccessGates[indexOf(subTenantAccessGates, from):] {
 		subTenantAccessCondition(st, generation, kind, false, reason, message)
 	}
 	subTenantAccessCondition(st, generation, "AccessReady", false, reason, message)
@@ -148,6 +155,9 @@ func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj 
 		return "OIDCAssociationPending", "Namespace allocation provisioned; waiting for the current ACTIVE EKS OIDC association"
 	}
 	subTenantAccessCondition(st, g, "OIDCReady", true, "OIDCAssociationObserved", "Ready, Synced, ACTIVE EKS association matches the current cluster and OIDC mapping")
+	if reason, message, waiting := r.awaitNetworkPolicy(ctx, st, g, guard, in.parent); waiting {
+		return reason, message
+	}
 	if !naas.EqualTenantSpec(guard.remote, in.desired) || guard.remote.GetAnnotations()[naas.SpecAnnotation] != in.desired.GetAnnotations()[naas.SpecAnnotation] {
 		subTenantAccessCondition(st, g, "AccessReady", false, "TenantSpecMismatch", "The observed Capsule Tenant does not match its render")
 		return "TenantSpecMismatch", "Namespace allocation provisioned; the observed Tenant does not match its render, so access stays closed"
@@ -176,6 +186,22 @@ func (r *SubTenantReconciler) reconcileSubTenantAccess(ctx context.Context, obj 
 	}
 	subTenantAccessCondition(st, g, "AccessReady", true, "AccessBindingsObserved", "Namespace-only group bindings and namespace readiness were freshly observed")
 	return "AccessReady", fmt.Sprintf("Namespace allocation provisioned; %d group bindings are ready in every allocated namespace", len(in.access.Bindings))
+}
+
+// awaitNetworkPolicy holds access closed until the parent cluster's vpc-cni
+// add-on enforces NetworkPolicy, Ready and Synced (true: waiting). Access
+// already open stays open (the gate is kept, AccessReady reports the wait):
+// an add-on update, or an older render that has not gained enforcement
+// yet, would otherwise pull every sub-tenant's access fleet-wide.
+func (r *SubTenantReconciler) awaitNetworkPolicy(ctx context.Context, st *cloud.SubTenantStatus, g int64, guard *subTenantAccessGuard, parent *cloud.Cluster) (string, string, bool) {
+	err := naas.ObserveNetworkPolicyEnforcement(ctx, r.deps.Direct, parent)
+	if err == nil {
+		subTenantAccessCondition(st, g, conditionNetworkPolicyReady, true, "NetworkPolicyEnforced", "The cluster's vpc-cni add-on is Ready and Synced and enforces NetworkPolicy")
+		return "", "", false
+	}
+	guard.keep = guard.remote.GetLabels()[naas.LabelAccessReady] == "true"
+	closeAccess(st, g, conditionNetworkPolicyReady, "NetworkPolicyPending", err.Error())
+	return "NetworkPolicyPending", "Namespace allocation provisioned; access waits for NetworkPolicy enforcement on the cluster: " + err.Error(), true
 }
 
 // subTenantGroupsNamed: the sub-tenant asks for human access.

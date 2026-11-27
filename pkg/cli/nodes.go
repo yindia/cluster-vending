@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -59,7 +60,47 @@ func ClusterNodes(ctx context.Context, c Clients, o Options) (proto.Message, err
 	if !isTable(o.Output) {
 		return all, nil
 	}
-	return nil, printNodes(o.Out, all, names, o.Output == OutputWide)
+	if err := printNodes(o.Out, all, names, o.Output == OutputWide); err != nil {
+		return nil, err
+	}
+	return nil, printNodeTotals(ctx, c, o, groups)
+}
+
+// printNodeTotals is the Totals section of cluster nodes: per group shown,
+// CPU and memory allocatable vs requested, read live
+// (ClusterService.GetNodeResources). A cluster that cannot be read live
+// says so instead; the node rows above stand.
+func printNodeTotals(ctx context.Context, c Clients, o Options, groups []string) error {
+	res, err := call(ctx, &cloudv1.GetNodeResourcesRequest{TenantId: o.Tenant, ClusterId: o.ID}, c.Cluster.GetNodeResources)
+	if err != nil {
+		_, werr := fmt.Fprintf(o.Out, "\nTotals: not read live: %v\n", err)
+		return werr
+	}
+	totals := res.(*cloudv1.GetNodeResourcesResponse)
+	title := "Totals"
+	if t := totals.GetLiveAt(); t != nil {
+		title += ", live as of " + t.AsTime().UTC().Format("2006-01-02 15:04:05") + " UTC"
+	}
+	if !totals.GetComplete() {
+		title += " (incomplete)"
+	}
+	var rows [][]string
+	for _, g := range totals.GetGroups() {
+		if slices.Contains(groups, g.GetNodeGroup()) {
+			rows = append(rows, totalsRow(g.GetNodeGroup(), g))
+		}
+	}
+	if len(groups) > 1 && totals.GetCluster() != nil {
+		rows = append(rows, totalsRow("(cluster)", totals.GetCluster()))
+	}
+	return section(o.Out, title, []string{"GROUP", "NODES", "CPU REQUESTED", "MEMORY REQUESTED", "PODS"}, rows)
+}
+
+func totalsRow(name string, t *cloudv1.NodeResourceTotals) []string {
+	return []string{name, fmt.Sprintf("%d/%d ready", t.GetReadyNodes(), t.GetNodes()),
+		share(t.GetRequestedCpuMillis(), t.GetAllocatableCpuMillis(), cpuText),
+		share(t.GetRequestedMemoryBytes(), t.GetAllocatableMemoryBytes(), memoryText),
+		fmt.Sprintf("%d/%d", t.GetPodCount(), t.GetAllocatablePods())}
 }
 
 // nodesRequest is the request of --ready, --not-ready, --name, --sort and

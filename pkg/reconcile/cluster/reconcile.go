@@ -185,6 +185,11 @@ func (s *Reconciler) moveOn(ctx context.Context, row *model.Cluster) error {
 		// renderer, or a renderer change would list it as pending forever.
 		return s.markApplied(ctx, row, nil)
 	}
+	// AWS upgraded the control plane by force: the spec follows EKS
+	// before anything renders the older minor it refuses.
+	if err := s.followAWSUpgrade(ctx, row); err != nil {
+		return fmt.Errorf("follow the EKS version: %w", err)
+	}
 	if unresolved(row) {
 		// The call stored the generation without looking at the cloud: the
 		// EKS name and the versions are checked here, before any render.

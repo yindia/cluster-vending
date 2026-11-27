@@ -741,8 +741,17 @@ type AwsClusterStatus struct {
 	// Karpenter.
 	KarpenterNodeRole    string `protobuf:"bytes,6,opt,name=karpenter_node_role,json=karpenterNodeRole,proto3" json:"karpenter_node_role,omitempty"`
 	KarpenterNodeRoleArn string `protobuf:"bytes,7,opt,name=karpenter_node_role_arn,json=karpenterNodeRoleArn,proto3" json:"karpenter_node_role_arn,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// The CloudWatch Logs log group the control plane's logs go to,
+	// "/aws/eks/<Cluster.name>/cluster": set when control plane logging is
+	// on (spec.aws.enabled_cluster_log_types is not empty, or the platform
+	// owns the group, spec.aws.control_plane_log_group.enabled). Derived
+	// from the spec when the cluster is read; empty when logging is off.
+	ControlPlaneLogGroup string `protobuf:"bytes,8,opt,name=control_plane_log_group,json=controlPlaneLogGroup,proto3" json:"control_plane_log_group,omitempty"`
+	// The CloudWatch console page of control_plane_log_group in the
+	// cluster's region (and partition); empty when the group is.
+	ControlPlaneLogsUrl string `protobuf:"bytes,9,opt,name=control_plane_logs_url,json=controlPlaneLogsUrl,proto3" json:"control_plane_logs_url,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *AwsClusterStatus) Reset() {
@@ -824,6 +833,20 @@ func (x *AwsClusterStatus) GetKarpenterNodeRoleArn() string {
 	return ""
 }
 
+func (x *AwsClusterStatus) GetControlPlaneLogGroup() string {
+	if x != nil {
+		return x.ControlPlaneLogGroup
+	}
+	return ""
+}
+
+func (x *AwsClusterStatus) GetControlPlaneLogsUrl() string {
+	if x != nil {
+		return x.ControlPlaneLogsUrl
+	}
+	return ""
+}
+
 var File_cloud_v1_aws_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_aws_proto_rawDesc = "" +
@@ -863,7 +886,7 @@ const file_cloud_v1_aws_proto_rawDesc = "" +
 	"\x0fAwsAccessConfig\x12Z\n" +
 	"\x13authentication_mode\x18\x01 \x01(\x0e2\x1f.cloud.v1.AwsAuthenticationModeB\b\xbaH\x05\x82\x01\x02\x10\x01R\x12authenticationMode\"Y\n" +
 	"\x10AwsUpgradePolicy\x12E\n" +
-	"\fsupport_type\x18\x01 \x01(\x0e2\x18.cloud.v1.AwsSupportTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vsupportType\"\xd8\x02\n" +
+	"\fsupport_type\x18\x01 \x01(\x0e2\x18.cloud.v1.AwsSupportTypeB\b\xbaH\x05\x82\x01\x02\x10\x01R\vsupportType\"\xc4\x03\n" +
 	"\x10AwsClusterStatus\x12\x1f\n" +
 	"\vcluster_arn\x18\x01 \x01(\tR\n" +
 	"clusterArn\x129\n" +
@@ -872,7 +895,9 @@ const file_cloud_v1_aws_proto_rawDesc = "" +
 	"\x0enode_group_arn\x18\x04 \x01(\tR\fnodeGroupArn\x120\n" +
 	"\x06addons\x18\x05 \x03(\v2\x18.cloud.v1.AwsAddonStatusR\x06addons\x12.\n" +
 	"\x13karpenter_node_role\x18\x06 \x01(\tR\x11karpenterNodeRole\x125\n" +
-	"\x17karpenter_node_role_arn\x18\a \x01(\tR\x14karpenterNodeRoleArn*\xf0\x01\n" +
+	"\x17karpenter_node_role_arn\x18\a \x01(\tR\x14karpenterNodeRoleArn\x125\n" +
+	"\x17control_plane_log_group\x18\b \x01(\tR\x14controlPlaneLogGroup\x123\n" +
+	"\x16control_plane_logs_url\x18\t \x01(\tR\x13controlPlaneLogsUrl*\xf0\x01\n" +
 	"\x15AwsAuthenticationMode\x12'\n" +
 	"#AWS_AUTHENTICATION_MODE_UNSPECIFIED\x10\x00\x12*\n" +
 	"\x1bAWS_AUTHENTICATION_MODE_API\x10\x01\x1a\t\x8a\xb5\x18\x05\n" +

@@ -9,6 +9,7 @@ import (
 	awsevents "github.com/upbound/provider-aws/v2/apis/namespaced/cloudwatchevents/v1beta1"
 	awseks "github.com/upbound/provider-aws/v2/apis/namespaced/eks/v1beta1"
 	awssqs "github.com/upbound/provider-aws/v2/apis/namespaced/sqs/v1beta1"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -185,29 +186,44 @@ func (s *Reconciler) releaseNodeRoleUsages(ctx context.Context, c *clusterRemova
 	return nil
 }
 
-// nodeStageErrors is when each deleting cluster's workload API was first
-// not reachable in the node groups' stage, to end the wait after the
-// teardown timeout. The status keeps it too (node_teardown), so a restart
-// does not count the timeout again; this is the process's copy, for a pass
-// whose status was not recorded.
+// nodeStageErrors is the node groups' stage's clock of each deleting
+// cluster (a *cloudv1.ClusterTeardown, never changed once stored): when the
+// stage started and, once it timed out, when. The status keeps it too
+// (node_teardown), so a restart does not count the timeout again; this is
+// the process's copy, for a pass whose status was not recorded.
 var nodeStageErrors sync.Map
 
-// nodeStageDownSince is when the node groups' stage first found the API
-// down: the earlier of the status's and the process's, at when neither has
-// it.
-func nodeStageDownSince(row *model.Cluster, at time.Time) time.Time {
-	first := at
-	if t := storedStatus(row).GetNodeTeardown().GetStartTime(); t != nil && t.AsTime().Before(first) {
-		first = t.AsTime()
+// nodeStageClock is the node groups' stage's clock: the status's or the
+// process's, whichever started first (a finished one wins), else one that
+// starts at at.
+func nodeStageClock(row *model.Cluster, at time.Time) *cloudv1.ClusterTeardown {
+	clock := storedStatus(row).GetNodeTeardown()
+	if v, ok := nodeStageErrors.Load(row.ID); ok {
+		kept := v.(*cloudv1.ClusterTeardown)
+		switch {
+		case clock.GetStartTime() == nil, clock.GetFinishTime() != nil:
+			if clock.GetStartTime() == nil {
+				clock = kept
+			}
+		case kept.GetFinishTime() != nil, kept.GetStartTime().AsTime().Before(clock.GetStartTime().AsTime()):
+			clock = kept
+		}
 	}
-	if v, loaded := nodeStageErrors.LoadOrStore(row.ID, first); loaded && v.(time.Time).Before(first) {
-		first = v.(time.Time)
+	if clock.GetStartTime() == nil {
+		return &cloudv1.ClusterTeardown{StartTime: timestamppb.New(at)}
 	}
-	return first
+	return proto.CloneOf(clock)
 }
 
-// clearNodeStageClock forgets when the node groups' stage found the API
-// down, in the process and in the status.
+// keepNodeStageClock stores the stage's clock in the process and for the
+// status the pass records.
+func keepNodeStageClock(ctx context.Context, id string, clock *cloudv1.ClusterTeardown) {
+	nodeStageErrors.Store(id, proto.CloneOf(clock))
+	setNodeTeardown(ctx, clock)
+}
+
+// clearNodeStageClock forgets the node groups' stage's clock, in the
+// process and in the status.
 func clearNodeStageClock(ctx context.Context, id string) {
 	nodeStageErrors.Delete(id)
 	setNodeTeardown(ctx, nil)
@@ -219,10 +235,12 @@ func clearNodeStageClock(ctx context.Context, id string) {
 // removes their instance profiles). Each waits until the one before is gone.
 // Nothing is deleted before the platform components above Karpenter are
 // gone, so nothing is scheduled onto the nodes being removed. Reads are
-// bounded (one page per kind, the pass deadline) and a wait ends after the
-// teardown timeout from the request to delete, with a warning naming what is
-// left (the deletion goes on). It reports whether the stage is over; a
-// cluster whose API cannot be reached is skipped (the teardown said so).
+// bounded (one page per kind, the pass deadline). The stage has one clock
+// (status.nodeTeardown): its wait, an API that does not answer included,
+// ends once the teardown timeout passed since the stage started, with a
+// warning naming what is left, told once (the finish is recorded; the
+// deletion goes on). It reports whether the stage is over; a cluster whose
+// API cannot be reached is skipped (the teardown said so).
 // The stage never fails the deletion: what goes wrong is its status message.
 func (s *Reconciler) deleteNodeGroups(ctx context.Context, row *model.Cluster, c *clusterRemoval, reachable bool) bool {
 	if s.deps.Teardowns == nil || !reachable || c.past() {
@@ -230,26 +248,30 @@ func (s *Reconciler) deleteNodeGroups(ctx context.Context, row *model.Cluster, c
 		return true
 	}
 	at := now()
+	clock := nodeStageClock(row, at)
+	if clock.GetFinishTime() != nil {
+		keepNodeStageClock(ctx, row.ID, clock)
+		return true // timed out before: the deletion went on
+	}
+	expired := at.Sub(clock.GetStartTime().AsTime()) >= s.teardownTimeout()
 	step, err := s.stepNodeGroups(ctx, row)
-	if err != nil {
-		first := nodeStageDownSince(row, at)
-		if at.Sub(first) >= s.teardownTimeout() {
-			clearNodeStageClock(ctx, row.ID)
-			return s.nodeStageTimedOut(ctx, row, "the cluster's API could not be reached: "+err.Error(), nil)
-		}
-		msg := "cannot reach the cluster's API: " + err.Error() + "; trying again"
-		setNodeTeardown(ctx, &cloudv1.ClusterTeardown{StartTime: timestamppb.New(first), Message: msg})
+	switch {
+	case err != nil && expired:
+		return s.nodeStageTimedOut(ctx, row, clock, at, "the cluster's API could not be reached: "+err.Error(), nil)
+	case err != nil:
+		clock.Message = "cannot reach the cluster's API: " + err.Error() + "; trying again"
+		keepNodeStageClock(ctx, row.ID, clock)
 		s.logger().WarnContext(ctx, "node groups teardown", "cluster_id", row.ID, "error", err)
-		setDeleteStage(ctx, stageNodeGroups, msg)
+		setDeleteStage(ctx, stageNodeGroups, clock.Message)
 		return false
-	}
-	clearNodeStageClock(ctx, row.ID)
-	if step.finished() {
+	case step.finished():
+		clearNodeStageClock(ctx, row.ID)
 		return true
+	case expired:
+		return s.nodeStageTimedOut(ctx, row, clock, at, step.message, step.waiting)
 	}
-	if !step.since.IsZero() && at.Sub(step.since) >= s.teardownTimeout() {
-		return s.nodeStageTimedOut(ctx, row, step.message, step.waiting)
-	}
+	clock.Message, clock.Waiting = step.message, refs(step.waiting)
+	keepNodeStageClock(ctx, row.ID, clock)
 	setDeleteStage(ctx, stageNodeGroups, step.message)
 	return false
 }
@@ -276,10 +298,15 @@ func (s *Reconciler) stepNodeGroups(ctx context.Context, row *model.Cluster) (te
 }
 
 // nodeStageTimedOut ends the stage after the teardown timeout: the deletion
-// goes on, and a warning says what is still there.
-func (s *Reconciler) nodeStageTimedOut(ctx context.Context, row *model.Cluster, what string, left []reconcile.WorkloadObject) bool {
+// goes on, a warning says what is still there, and the stage's clock
+// records the finish, so later passes do not tell it again.
+func (s *Reconciler) nodeStageTimedOut(ctx context.Context, row *model.Cluster, clock *cloudv1.ClusterTeardown, at time.Time,
+	what string, left []reconcile.WorkloadObject) bool {
 	msg := fmt.Sprintf("node groups: timed out after %s (%s); going on: the cloud sweep (stage %d) terminates Karpenter's EC2 instances "+
 		"and deletes its launch templates by the cluster's tags, and its instance profiles go before its node role", s.teardownTimeout(), what, stageKarpenter)
+	clock.FinishTime, clock.Result = timestamppb.New(at), cloudv1.ClusterTeardownResult_CLUSTER_TEARDOWN_RESULT_TIMED_OUT
+	clock.Message, clock.Waiting = msg, refs(left)
+	keepNodeStageClock(ctx, row.ID, clock)
 	reconcile.AddNote(ctx, reconcile.Warning(reconcile.ReasonTeardownTimedOut, msg))
 	s.logger().WarnContext(ctx, "node groups teardown timed out", "cluster_id", row.ID, "left", refs(left))
 	return true

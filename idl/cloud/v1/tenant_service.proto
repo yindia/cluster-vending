@@ -25,6 +25,17 @@ service TenantService {
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {
     option idempotency_level = IDEMPOTENT;
   }
+  // Deletes a tenant's registration. Refused with FAILED_PRECONDITION,
+  // naming what remains, while the tenant has cloud accounts, networks,
+  // clusters, components or sub-tenants: delete those first. Otherwise
+  // the Tenant CR is deleted; its finalizer (the tenant controller)
+  // unregisters the namespace tenant-<tenant_id> without deleting it or
+  // its contents, so a later CreateTenant of the same ID can take it back.
+  // NOT_FOUND for an unknown tenant; a tenant already being deleted
+  // answers as deleted.
+  rpc DeleteTenant(DeleteTenantRequest) returns (DeleteTenantResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
   // Tenant-scoped dashboard operations. An omitted target means this tenant,
   // never the platform; a network or cluster must belong to tenant_id.
   rpc Freeze(TenantFreezeRequest) returns (FreezeResponse);

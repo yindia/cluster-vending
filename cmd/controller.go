@@ -66,6 +66,11 @@ func newControllerCmd(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// How the Crossplane providers run: the "providers" section.
+			providers, err := config.ProvidersFrom(changedFlags(cmd.Flags()), os.LookupEnv)
+			if err != nil {
+				return err
+			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return manager.Run(ctx, manager.Options{
@@ -74,8 +79,10 @@ func newControllerCmd(g *globals) *cobra.Command {
 				LeaderElect: cfg.LeaderElect, LeaseNamespace: cfg.LeaseNamespace, ServiceAccount: cfg.ServiceAccount,
 				AWS: cfg.AWS, AWSAccess: cfg.AWSAccess, Logger: g.logger, InstallProviders: cfg.InstallProviders, InstallCatalog: cfg.InstallCatalog,
 				RecoverStuckReleases: cfg.RecoverStuckReleases, HelmBackoffMax: cfg.HelmBackoffMax, HelmMaxFailures: cfg.HelmMaxFailures, Recommendations: cfg.Recommendations,
-				NodeGroups:       cfg.NodeGroups,
-				NaaS:             naasCfg,
+				NodeGroups:  cfg.NodeGroups,
+				NaaS:        naasCfg,
+				Providers:   providers,
+				ScanWorkers: cfg.ScanWorkers, KubeQPS: cfg.KubeQPS, KubeBurst: cfg.KubeBurst,
 				ReconcileWorkers: cfg.ReconcileWorkers, AutomaticUpgrades: cfg.AutomaticUpgrades, UpgradeTimeout: cfg.UpgradeTimeout, TeardownTimeout: cfg.TeardownTimeout,
 			})
 		},

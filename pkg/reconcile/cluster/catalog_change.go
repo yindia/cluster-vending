@@ -106,8 +106,8 @@ type catalogDecision struct {
 	Recover string
 }
 
-// held reports whether the entry's change waits this pass.
-func (d catalogDecision) held(name string) bool { return d.Hold[name] }
+// poolHeld reports whether the platform pool's change waits this pass.
+func (d catalogDecision) poolHeld() bool { return d.Hold[poolEntry] }
 
 // hashes are the fingerprints of entries.
 func hashes(entries map[string]catalogEntry) map[string]string {

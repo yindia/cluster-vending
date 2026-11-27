@@ -185,10 +185,10 @@ func TestAuthOverlayKeepsTheSharedNodeGroups(t *testing.T) {
 		if err := yaml.Unmarshal(raw, &doc); err != nil {
 			t.Fatal(err)
 		}
-		return doc["nodeGroups"]
+		return []any{doc["nodeGroups"], doc["providers"]}
 	}
 	if a, b := section("node-groups/platform.yaml"), section("server/auth/platform.yaml"); !reflect.DeepEqual(a, b) {
-		t.Errorf("server/auth/platform.yaml nodeGroups %v differs from node-groups/platform.yaml %v", b, a)
+		t.Errorf("server/auth/platform.yaml nodeGroups and providers %v differ from node-groups/platform.yaml %v", b, a)
 	}
 	if _, err := config.LoadAuth("server/auth/platform.yaml"); err != nil {
 		t.Error(err)

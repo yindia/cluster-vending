@@ -300,7 +300,7 @@ func (s *ClusterService) UpdateCluster(ctx context.Context, req *cloudv1.UpdateC
 				"the plan is stale: the request or a resource changed since it was made; plan again (validate_only)")
 		}
 		if !plan.GetApplicable() {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, "the plan is not applicable: it changes a field the cloud cannot change")
+			return nil, connect.NewError(connect.CodeFailedPrecondition, service.NotApplicable("it changes a field the cloud cannot change", plan))
 		}
 	}
 	if row.Spec, err = reconcilecluster.Encode(spec); err != nil {

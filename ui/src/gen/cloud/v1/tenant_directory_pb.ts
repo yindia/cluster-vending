@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file cloud/v1/tenant_directory.proto.
  */
 export const file_cloud_v1_tenant_directory: GenFile = /*@__PURE__*/
-  fileDesc("Ch9jbG91ZC92MS90ZW5hbnRfZGlyZWN0b3J5LnByb3RvEghjbG91ZC52MSJJCgpUZW5hbnRJbmZvEgoKAmlkGAEgASgJEi8KC2NyZWF0ZV90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIUChJMaXN0VGVuYW50c1JlcXVlc3QiWAoTTGlzdFRlbmFudHNSZXNwb25zZRIlCgd0ZW5hbnRzGAEgAygLMhQuY2xvdWQudjEuVGVuYW50SW5mbxIaChJjYW5fY3JlYXRlX3RlbmFudHMYAiABKAgiWQoTQ3JlYXRlVGVuYW50UmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kIjwKFENyZWF0ZVRlbmFudFJlc3BvbnNlEiQKBnRlbmFudBgBIAEoCzIULmNsb3VkLnYxLlRlbmFudEluZm9CpAEKDGNvbS5jbG91ZC52MUIUVGVuYW50RGlyZWN0b3J5UHJvdG9QAVo9Z2l0aHViLmNvbS95aW5kaWEvY2x1c3Rlci12ZW5kaW5nL3BrZy9nZW4vZ28vY2xvdWQvdjE7Y2xvdWR2MaICA0NYWKoCCENsb3VkLlYxygIIQ2xvdWRcVjHiAhRDbG91ZFxWMVxHUEJNZXRhZGF0YeoCCUNsb3VkOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("Ch9jbG91ZC92MS90ZW5hbnRfZGlyZWN0b3J5LnByb3RvEghjbG91ZC52MSJJCgpUZW5hbnRJbmZvEgoKAmlkGAEgASgJEi8KC2NyZWF0ZV90aW1lGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCIUChJMaXN0VGVuYW50c1JlcXVlc3QiWAoTTGlzdFRlbmFudHNSZXNwb25zZRIlCgd0ZW5hbnRzGAEgAygLMhQuY2xvdWQudjEuVGVuYW50SW5mbxIaChJjYW5fY3JlYXRlX3RlbmFudHMYAiABKAgiWQoTQ3JlYXRlVGVuYW50UmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kIjwKFENyZWF0ZVRlbmFudFJlc3BvbnNlEiQKBnRlbmFudBgBIAEoCzIULmNsb3VkLnYxLlRlbmFudEluZm8iWQoTRGVsZXRlVGVuYW50UmVxdWVzdBJCCgl0ZW5hbnRfaWQYASABKAlCL7pILHIqEAEYODIkXlthLXowLTldKFthLXowLTktXXswLDU0fVthLXowLTldKT8kIjwKFERlbGV0ZVRlbmFudFJlc3BvbnNlEiQKBnRlbmFudBgBIAEoCzIULmNsb3VkLnYxLlRlbmFudEluZm9CpAEKDGNvbS5jbG91ZC52MUIUVGVuYW50RGlyZWN0b3J5UHJvdG9QAVo9Z2l0aHViLmNvbS95aW5kaWEvY2x1c3Rlci12ZW5kaW5nL3BrZy9nZW4vZ28vY2xvdWQvdjE7Y2xvdWR2MaICA0NYWKoCCENsb3VkLlYxygIIQ2xvdWRcVjHiAhRDbG91ZFxWMVxHUEJNZXRhZGF0YeoCCUNsb3VkOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * A registered tenant; no account or authorization metadata is exposed.
@@ -110,4 +110,40 @@ export type CreateTenantResponse = Message<"cloud.v1.CreateTenantResponse"> & {
  */
 export const CreateTenantResponseSchema: GenMessage<CreateTenantResponse> = /*@__PURE__*/
   messageDesc(file_cloud_v1_tenant_directory, 4);
+
+/**
+ * @generated from message cloud.v1.DeleteTenantRequest
+ */
+export type DeleteTenantRequest = Message<"cloud.v1.DeleteTenantRequest"> & {
+  /**
+   * @generated from field: string tenant_id = 1;
+   */
+  tenantId: string;
+};
+
+/**
+ * Describes the message cloud.v1.DeleteTenantRequest.
+ * Use `create(DeleteTenantRequestSchema)` to create a new message.
+ */
+export const DeleteTenantRequestSchema: GenMessage<DeleteTenantRequest> = /*@__PURE__*/
+  messageDesc(file_cloud_v1_tenant_directory, 5);
+
+/**
+ * @generated from message cloud.v1.DeleteTenantResponse
+ */
+export type DeleteTenantResponse = Message<"cloud.v1.DeleteTenantResponse"> & {
+  /**
+   * The tenant as it was when its deletion was asked for.
+   *
+   * @generated from field: cloud.v1.TenantInfo tenant = 1;
+   */
+  tenant?: TenantInfo | undefined;
+};
+
+/**
+ * Describes the message cloud.v1.DeleteTenantResponse.
+ * Use `create(DeleteTenantResponseSchema)` to create a new message.
+ */
+export const DeleteTenantResponseSchema: GenMessage<DeleteTenantResponse> = /*@__PURE__*/
+  messageDesc(file_cloud_v1_tenant_directory, 6);
 

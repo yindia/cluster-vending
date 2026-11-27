@@ -105,7 +105,7 @@ func TestCodeConvergenceWithoutProviderObservedGeneration(t *testing.T) {
 // run since. A bound shorter than the poll finishes a change on a cached
 // Ready=True.
 func TestProviderObservationBoundCoversTheEC2Poll(t *testing.T) {
-	poll := crossplaneaws.DefaultProviderRuntime().EC2Poll
+	poll := crossplaneaws.DefaultProviderRuntime().For("provider-aws-ec2").Poll
 	if providerObservationBound <= poll {
 		t.Errorf("observation bound %s is not longer than the EC2 poll %s", providerObservationBound, poll)
 	}

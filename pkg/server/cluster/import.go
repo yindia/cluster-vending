@@ -189,7 +189,7 @@ func takeOverAllowed(row *model.Cluster, req *cloudv1.TakeOverClusterRequest) (*
 	}
 	imp := reconcilecluster.StoredImport(row)
 	if imp.GetPhase() != cloudv1.ImportPhase_IMPORT_PHASE_PLANNED {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("import phase is %s, want PLANNED", imp.GetPhase()))
+		return nil, service.ImportNotPlanned("cluster", row.ID, imp, lookupError(row))
 	}
 	left := corecluster.NotImported(imp.GetResources())
 	if len(left) > 0 && !req.GetAcknowledgeNotImported() {
@@ -198,4 +198,17 @@ func takeOverAllowed(row *model.Cluster, req *cloudv1.TakeOverClusterRequest) (*
 			len(left), left[0].GetKind(), left[0].GetExternalName(), left[0].GetDetail()))
 	}
 	return imp, nil
+}
+
+// lookupError is the stored status message of a cluster whose import
+// lookup failed (state FAILED); empty otherwise.
+func lookupError(row *model.Cluster) string {
+	st := &cloudv1.ClusterStatus{}
+	if len(row.Status) == 0 || reconcilecluster.Lenient.Unmarshal(row.Status, st) != nil {
+		return ""
+	}
+	if st.GetState() != cloudv1.ClusterState_CLUSTER_STATE_FAILED {
+		return ""
+	}
+	return st.GetMessage()
 }

@@ -69,3 +69,16 @@ func TestUpdatesReviewResourcePlanBeforeApply(t *testing.T) {
 		}
 	}
 }
+
+func TestNotApplicablePlanNamesTheBlockingChanges(t *testing.T) {
+	plan := &v1.Plan{PlanId: "p", Changes: []*v1.PlannedChange{
+		{SpecPath: "spec.region", Action: v1.PlannedAction_PLANNED_ACTION_REJECTED_IMMUTABLE},
+		{Kind: "Subnet", Name: "a", Action: v1.PlannedAction_PLANNED_ACTION_REJECTED_IMMUTABLE},
+		{SpecPath: "spec.labels", Action: v1.PlannedAction_PLANNED_ACTION_UPDATE_IN_PLACE},
+	}}
+	var progress bytes.Buffer
+	err := reviewUpdatePlan(Options{Progress: &progress}, plan)
+	if err == nil || !strings.Contains(err.Error(), "(spec.region, Subnet a)") || strings.Contains(err.Error(), "spec.labels") {
+		t.Fatalf("err = %v", err)
+	}
+}

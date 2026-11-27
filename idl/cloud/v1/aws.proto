@@ -308,4 +308,13 @@ message AwsClusterStatus {
   // Karpenter.
   string karpenter_node_role = 6;
   string karpenter_node_role_arn = 7;
+  // The CloudWatch Logs log group the control plane's logs go to,
+  // "/aws/eks/<Cluster.name>/cluster": set when control plane logging is
+  // on (spec.aws.enabled_cluster_log_types is not empty, or the platform
+  // owns the group, spec.aws.control_plane_log_group.enabled). Derived
+  // from the spec when the cluster is read; empty when logging is off.
+  string control_plane_log_group = 8;
+  // The CloudWatch console page of control_plane_log_group in the
+  // cluster's region (and partition); empty when the group is.
+  string control_plane_logs_url = 9;
 }

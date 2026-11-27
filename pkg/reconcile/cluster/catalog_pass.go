@@ -126,7 +126,7 @@ func (s *Reconciler) catalogEntries(row *model.Cluster, defs []cloudv1alpha1.Com
 		now[e.Name] = catalogEntry{Hash: component.CatalogFingerprint(e, in.Vars(e.Name)), Sequence: e.Sequence}
 	}
 	if pool := s.platformPoolInput(); pool != nil {
-		now[poolEntry] = catalogEntry{Hash: component.Fingerprint(pool), Sequence: poolSequence}
+		now[poolEntry] = catalogEntry{Hash: poolFingerprint(row, pool), Sequence: poolSequence}
 	}
 	removedSeq, requires = map[string]int32{}, map[string][]string{}
 	for i := range defs {
@@ -135,6 +135,20 @@ func (s *Reconciler) catalogEntries(row *model.Cluster, defs []cloudv1alpha1.Com
 		}
 	}
 	return now, removedSeq, requires, nil
+}
+
+// poolFingerprint is the platform pool's catalog fingerprint: its settings
+// and the tags its EC2NodeClass gives the nodes (KarpenterNodeTags, from the
+// cluster's labels). Karpenter replaces the pool's nodes when either
+// changes (drift), so a change of the tags (a build that adds them, a label
+// change) is a catalog change like any other, admitted per channel and
+// tier; until then the pass does not write the pool (holdPool), and it
+// keeps its old tags.
+func poolFingerprint(row *model.Cluster, pool *crossplaneaws.PlatformPoolInput) string {
+	return component.Fingerprint(struct {
+		Pool *crossplaneaws.PlatformPoolInput `json:"pool"`
+		Tags map[string]string                `json:"tags"`
+	}{pool, crossplaneaws.KarpenterNodeTags(row.TenantID, row.ID, row.Name, row.Labels)})
 }
 
 // storedPoolPhase is the platform pool's phase as the last pass recorded it.
@@ -249,7 +263,7 @@ func (p *catalogPass) status() *cloudv1.CatalogChange {
 }
 
 // holdPool reports whether the platform pool's change waits this pass.
-func (p *catalogPass) holdPool() bool { return p != nil && p.d.held(poolEntry) }
+func (p *catalogPass) holdPool() bool { return p != nil && p.d.poolHeld() }
 
 // CatalogChanging reports whether the row's recorded status has a catalog
 // change waiting for its turn or being applied.

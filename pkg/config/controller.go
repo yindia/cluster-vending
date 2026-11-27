@@ -31,6 +31,16 @@ const (
 	// deleting the load balancers and Karpenter nodes its controllers made.
 	FlagTeardownTimeout = "teardown-timeout"
 	EnvTeardownTimeout  = "CV_TEARDOWN_TIMEOUT"
+	// FlagScanWorkers is how many clusters each scanner (deprecated APIs,
+	// policy, resource recommendations) reads at once.
+	FlagScanWorkers = "scan-workers"
+	EnvScanWorkers  = "CV_SCAN_WORKERS"
+	// FlagKubeQPS and FlagKubeBurst are the client-side rate limits of the
+	// controller's clients of the management cluster.
+	FlagKubeQPS   = "kube-qps"
+	EnvKubeQPS    = "CV_KUBE_QPS"
+	FlagKubeBurst = "kube-burst"
+	EnvKubeBurst  = "CV_KUBE_BURST"
 )
 
 // Defaults of the controller command.
@@ -42,6 +52,15 @@ const (
 	// network, a Helm install) no longer holds up every other object of
 	// its kind. An object is never reconciled by two workers at once.
 	DefaultReconcileWorkers = 8
+	// DefaultScanWorkers: a scan of one cluster can take tens of seconds
+	// (an unreachable one up to its timeout), so one at a time leaves
+	// ~100 clusters waiting; four bound what the scans cost the
+	// controller and the workload API servers.
+	DefaultScanWorkers = 4
+	// DefaultKubeQPS and DefaultKubeBurst are kube.DefaultQPS and
+	// kube.DefaultBurst.
+	DefaultKubeQPS   = 50
+	DefaultKubeBurst = 100
 	// DefaultUpgradeTimeout covers an EKS control plane upgrade (about 10
 	// minutes), a node group's rolling replacement and the add-ons.
 	DefaultUpgradeTimeout = 90 * time.Minute
@@ -59,11 +78,10 @@ const (
 )
 
 // controllerSettings are all the controller takes. How the providers run
-// (poll intervals, reconcile rate, resources) is fixed in the code that
-// renders their runtime config (crossplaneaws.DefaultProviderRuntime);
-// an operator who needs other values sets --install-providers=false and
-// manages the provider objects. The controller always brings resources to
-// this build's renderer.
+// (poll intervals, reconcile rate, resources, replicas) is the settings
+// file's "providers" section (LoadProviders) over the platform's defaults
+// (crossplaneaws.DefaultProviderRuntime). The controller always brings
+// resources to this build's renderer.
 var controllerSettings = withNodeGroupSettings([]Setting{
 	{Flag: FlagConfig, Env: EnvConfig,
 		Usage: "YAML file with any of these settings, keyed by flag name; flags and environment variables win over it"},
@@ -80,7 +98,7 @@ var controllerSettings = withNodeGroupSettings([]Setting{
 	{Flag: FlagAWSManagementRoleARN, Env: EnvAWSManagementRoleARN,
 		Usage: "IAM role ARN the Crossplane AWS providers run as (IRSA), in the management account (the account is taken from the ARN); tenant roles trust it; required"},
 	{Flag: FlagInstallProviders, Env: EnvInstallProviders, Default: "true",
-		Usage: "on startup, create the Crossplane AWS providers, provider-helm and the AWS runtime config when missing (existing ones are left as they are); false when they are managed elsewhere, also to run the providers with other settings than the platform's"},
+		Usage: "on every start, bring the Crossplane AWS providers, provider-helm and their runtime configs (the config file's providers section) to this build: missing ones are created, runtime configs are server-side applied (fields set by another field manager are kept) and existing providers keep their package version; false when they are managed elsewhere"},
 	{Flag: FlagInstallCatalog, Env: EnvInstallCatalog, Default: "true",
 		Usage: "on startup, create the component catalog this build ships (pkg/catalog/definitions) where a ComponentDefinition of that name is missing (existing ones are left as they are); false when the platform team manages the catalog itself"},
 	{Flag: FlagRecoverStuckReleases, Env: EnvRecoverStuckReleases, Default: "true",
@@ -93,6 +111,12 @@ var controllerSettings = withNodeGroupSettings([]Setting{
 		Usage: "every five minutes, read each running cluster's workloads, the usage its metrics-server reports and its own Vertical Pod Autoscalers (read-only, nothing is installed there) and record a week of usage, for resource recommendations (ListClusterRecommendations); false records nothing"},
 	{Flag: FlagReconcileWorkers, Env: EnvReconcileWorkers, Default: strconv.Itoa(DefaultReconcileWorkers),
 		Usage: "how many cloud accounts, networks and clusters of each kind are reconciled at once (at least 1); one object is never reconciled twice at the same time"},
+	{Flag: FlagScanWorkers, Env: EnvScanWorkers, Default: strconv.Itoa(DefaultScanWorkers),
+		Usage: "how many clusters each scanner (deprecated APIs, policy, resource recommendations) reads at once (at least 1); a cluster whose status says Reachable=False is skipped until a short probe of its API server succeeds, tried at most every 5m"},
+	{Flag: FlagKubeQPS, Env: EnvKubeQPS, Default: strconv.Itoa(DefaultKubeQPS),
+		Usage: "client-side requests per second of the controller's clients of the management cluster (more than 0); each workload cluster's client has its own limit (20, burst 40)"},
+	{Flag: FlagKubeBurst, Env: EnvKubeBurst, Default: strconv.Itoa(DefaultKubeBurst),
+		Usage: "client-side burst of the controller's clients of the management cluster (at least --kube-qps)"},
 	{Flag: FlagAutomaticUpgrades, Env: EnvAutomaticUpgrades, Default: "false",
 		Usage: "upgrade clusters with upgradeMode Automatic to their release channel's Kubernetes minor, one minor at a time, tier by tier (irreversible: EKS cannot downgrade); false plans and reports the rollout on each ReleaseChannel and cluster (status.rollout) and upgrades nothing"},
 	{Flag: FlagUpgradeTimeout, Env: EnvUpgradeTimeout, Default: DefaultUpgradeTimeout.String(),
@@ -136,6 +160,12 @@ type Controller struct {
 	// ReconcileWorkers is how many objects of each kind are reconciled at
 	// once (at least 1).
 	ReconcileWorkers int
+	// ScanWorkers is how many clusters each scanner reads at once (at
+	// least 1).
+	ScanWorkers int
+	// KubeQPS and KubeBurst are the management clients' rate limits.
+	KubeQPS   float32
+	KubeBurst int
 	// AutomaticUpgrades: upgrade automatic clusters to their channel's
 	// minor; off, the rollout is reported only.
 	AutomaticUpgrades bool
@@ -212,6 +242,9 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 	if cfg.ReconcileWorkers, err = strconv.Atoi(v[FlagReconcileWorkers]); err != nil || cfg.ReconcileWorkers < 1 {
 		errs = append(errs, fmt.Errorf("%s must be a whole number of at least 1, got %q", setting(FlagReconcileWorkers), v[FlagReconcileWorkers]))
 	}
+	var throughputErrs []error
+	cfg.ScanWorkers, cfg.KubeQPS, cfg.KubeBurst, throughputErrs = throughputFrom(v)
+	errs = append(errs, throughputErrs...)
 	if cfg.AutomaticUpgrades, err = strconv.ParseBool(v[FlagAutomaticUpgrades]); err != nil {
 		errs = append(errs, fmt.Errorf("%s must be true or false, got %q", setting(FlagAutomaticUpgrades), v[FlagAutomaticUpgrades]))
 	}
@@ -237,6 +270,29 @@ func LoadController(flags, env, file LookupFunc) (Controller, error) {
 		return Controller{}, invalid(errs)
 	}
 	return cfg, nil
+}
+
+// throughputFrom reads the scanners' workers and the management clients'
+// rate limits.
+func throughputFrom(v map[string]string) (int, float32, int, []error) {
+	var errs []error
+	workers, err := strconv.Atoi(v[FlagScanWorkers])
+	if err != nil || workers < 1 {
+		errs = append(errs, fmt.Errorf("%s must be a whole number of at least 1, got %q", setting(FlagScanWorkers), v[FlagScanWorkers]))
+	}
+	qps, err := strconv.ParseFloat(v[FlagKubeQPS], 32)
+	if err != nil || qps <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be a number above 0 like 50, got %q", setting(FlagKubeQPS), v[FlagKubeQPS]))
+	}
+	burst, err := strconv.Atoi(v[FlagKubeBurst])
+	switch {
+	case err != nil || burst < 1:
+		errs = append(errs, fmt.Errorf("%s must be a whole number of at least 1, got %q", setting(FlagKubeBurst), v[FlagKubeBurst]))
+	case float64(burst) < qps:
+		errs = append(errs, fmt.Errorf("%s (%d) must be at least %s (%s): a burst below the rate never lets the rate be reached",
+			setting(FlagKubeBurst), burst, setting(FlagKubeQPS), v[FlagKubeQPS]))
+	}
+	return workers, float32(qps), burst, errs
 }
 
 // ServiceAccountRef names a service account.

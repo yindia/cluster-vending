@@ -86,11 +86,12 @@ func NewRecommendationReconciler(d Deps) *RecommendationReconciler {
 	return &RecommendationReconciler{deps: d, enabled: !d.NoRecommendations, sink: resultsink.New(d.Deps, d.logger()), history: &historyGate{}}
 }
 
-// SetupWithManager registers the sampler: one cluster at a time, woken
+// SetupWithManager registers the sampler: Deps.ScanWorkers clusters at a time, woken
 // by a change of a cluster's spec and by its own schedule.
 func (r *RecommendationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).Named("cluster-recommendations").
 		For(&cloudv1alpha1.Cluster{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		WithOptions(scanOptions(r.deps)).
 		Complete(r)
 }
 
@@ -116,6 +117,12 @@ func (r *RecommendationReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if frozen.Holds() || managed.IsPaused(obj) || id == "" || !scannable(obj) {
 		return ctrl.Result{RequeueAfter: notScannableDelay}, nil
 	}
+	kubeconfig := func(ctx context.Context) ([]byte, error) {
+		return reconcile.ReadKubeconfig(ctx, r.deps.Direct, obj.Namespace, obj.Status.KubeconfigSecret)
+	}
+	if wait, skip := r.deps.Reachability.Skip(ctx, obj, kubeconfig); skip {
+		return ctrl.Result{RequeueAfter: wait}, nil
+	}
 	sampler := r.sampler
 	sampler.Store = r.deps.Store.Clusters()
 	sampler.Publish = func(ctx context.Context, _ recommendations.Cluster, summary *cloudv1.ClusterRecommendations, h recommend.History, at time.Time) string {
@@ -123,10 +130,8 @@ func (r *RecommendationReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	next, err := sampler.Run(ctx, recommendations.Cluster{
 		TenantID: tenant, ID: id, Last: convert.RecommendationsFromAPI(obj.Status.Recommendations),
-		Kubeconfig: func(ctx context.Context) ([]byte, error) {
-			return reconcile.ReadKubeconfig(ctx, r.deps.Direct, obj.Namespace, obj.Status.KubeconfigSecret)
-		},
-		Platform: r.platformNamespaces(ctx),
+		Kubeconfig: kubeconfig,
+		Platform:   r.platformNamespaces(ctx),
 	})
 	if err != nil {
 		return ctrl.Result{}, err

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect/v2"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
@@ -22,6 +23,15 @@ type nodeService struct {
 	nodes     map[string][]*cloudv1.NodeGroupNode
 	requests  []*cloudv1.ListNodeGroupNodesRequest
 	manifests []*cloudv1.NodeGroupManifest
+	// totals answers GetNodeResources; nil: UNIMPLEMENTED.
+	totals *cloudv1.GetNodeResourcesResponse
+}
+
+func (s *nodeService) GetNodeResources(context.Context, *cloudv1.GetNodeResourcesRequest) (*cloudv1.GetNodeResourcesResponse, error) {
+	if s.totals == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, "the server has no live reader")
+	}
+	return s.totals, nil
 }
 
 func (s *nodeService) GetCluster(_ context.Context, _ *cloudv1.GetClusterRequest) (*cloudv1.GetClusterResponse, error) {
@@ -140,5 +150,38 @@ func TestClusterNodesManifests(t *testing.T) {
 	}
 	if err := Run(t.Context(), ClusterNodes, Clients{Cluster: svc}, Options{Tenant: "acme", ID: nodesCluster, Manifests: true, NodeGroup: "web"}, &out, OutputTable); err == nil {
 		t.Error("an unknown group was accepted")
+	}
+}
+
+func TestClusterNodesPrintsTotalsPerGroup(t *testing.T) {
+	withClock(t)
+	svc := &nodeService{groups: []string{"system", "web"}, nodes: map[string][]*cloudv1.NodeGroupNode{
+		"system": {node("a", true, 500, 2000)}, "web": {node("b", true, 1000, 4000)}},
+		totals: &cloudv1.GetNodeResourcesResponse{Complete: true, LiveAt: timestamppb.New(time.Date(2026, 11, 22, 4, 0, 0, 0, time.UTC)),
+			Groups: []*cloudv1.NodeResourceTotals{
+				{NodeGroup: "system", Nodes: 1, ReadyNodes: 1, AllocatableCpuMillis: 2000, RequestedCpuMillis: 500, AllocatableMemoryBytes: 8 << 30, RequestedMemoryBytes: 2 << 30, PodCount: 12, AllocatablePods: 35},
+				{NodeGroup: "web", Nodes: 1, ReadyNodes: 1, AllocatableCpuMillis: 4000, RequestedCpuMillis: 1000, AllocatableMemoryBytes: 8 << 30, RequestedMemoryBytes: 4 << 30, PodCount: 3, AllocatablePods: 35},
+			},
+			Cluster: &cloudv1.NodeResourceTotals{Nodes: 2, ReadyNodes: 2, AllocatableCpuMillis: 6000, RequestedCpuMillis: 1500, AllocatableMemoryBytes: 16 << 30, RequestedMemoryBytes: 6 << 30, PodCount: 15, AllocatablePods: 70}}}
+	var out bytes.Buffer
+	if err := Run(t.Context(), ClusterNodes, Clients{Cluster: svc}, Options{Tenant: "acme", ID: nodesCluster}, &out, OutputTable); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Totals, live as of 2026-11-22 04:00:00 UTC:", "system", "500m/2000m (25%)", "4096Mi/8192Mi (50%)", "(cluster)", "1500m/6000m (25%)", "2/2 ready"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestClusterNodesWithoutLiveReaderSaysSo(t *testing.T) {
+	withClock(t)
+	svc := &nodeService{groups: []string{"system"}, nodes: map[string][]*cloudv1.NodeGroupNode{"system": {node("a", true, 500, 2000)}}}
+	var out bytes.Buffer
+	if err := Run(t.Context(), ClusterNodes, Clients{Cluster: svc}, Options{Tenant: "acme", ID: nodesCluster}, &out, OutputTable); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Totals: not read live:") || !strings.Contains(out.String(), "NAME") {
+		t.Fatalf("output:\n%s", out.String())
 	}
 }

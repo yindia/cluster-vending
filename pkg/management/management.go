@@ -37,9 +37,9 @@ const kindsTimeout = 5 * time.Minute
 // Options say how to reach and prepare the management cluster.
 type Options struct {
 	Kubeconfig, KubeContext string
-	// InstallProviders creates the Crossplane providers, provider-helm and
-	// the activation policy when missing; ProviderRuntime is how the AWS
-	// providers run. Only the controller installs them; the API server
+	// InstallProviders brings the Crossplane providers, provider-helm,
+	// their runtime configs and the activation policy to this build
+	// (crossplaneaws.InstallProviders); ProviderRuntime is how they run. Only the controller installs them; the API server
 	// waits for their kinds.
 	InstallProviders bool
 	// InstallKinds installs the CustomResourceDefinitions of the platform's
@@ -49,7 +49,10 @@ type Options struct {
 	ProviderRuntime crossplaneaws.ProviderRuntime
 	// LeaderElection of the controllers; the API server needs none.
 	LeaderElection kube.LeaderElection
-	Logger         *slog.Logger
+	// RateLimits of the management cluster's clients; zero: kube's
+	// defaults.
+	RateLimits kube.RateLimits
+	Logger     *slog.Logger
 	// WatchPlatformKinds also caches the platform's own kinds (CloudAccount,
 	// Network, Cluster), whatever their labels: the controller manager
 	// watches them. They must be installed (ConnectStore with InstallKinds).
@@ -67,7 +70,7 @@ type Options struct {
 // the informer cache. Register controllers on it, then Start.
 func Connect(ctx context.Context, o Options) (manager.Manager, error) {
 	ctrllog.SetLogger(logr.FromSlogHandler(o.Logger.Handler()))
-	cfg, err := kube.RESTConfig(o.Kubeconfig, o.KubeContext)
+	cfg, err := kube.RESTConfigWith(o.Kubeconfig, o.KubeContext, o.RateLimits)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +83,11 @@ func Connect(ctx context.Context, o Options) (manager.Manager, error) {
 		if err != nil {
 			return nil, fmt.Errorf("install the Crossplane providers (is Crossplane installed?): %w", err)
 		}
-		o.Logger.Info("crossplane providers", "created", res.Created, "existing", res.Existing, "updated", res.Updated)
+		o.Logger.Info("crossplane providers", "created", res.Created, "existing", res.Existing, "updated", res.Updated, "deleted", res.Deleted)
+		if len(res.Kept) > 0 {
+			o.Logger.Info("provider fields set by another field manager (an operator) are kept as they are; remove that manager's change to take this build's",
+				"kept", res.Kept)
+		}
 	}
 	scheme, err := kube.Scheme()
 	if err != nil {
@@ -116,7 +123,7 @@ func Connect(ctx context.Context, o Options) (manager.Manager, error) {
 // server, not from the manager's cache: a row is read right after it was
 // written.
 func ConnectStore(ctx context.Context, o Options) (repository.Store, error) {
-	cfg, err := kube.RESTConfig(o.Kubeconfig, o.KubeContext)
+	cfg, err := kube.RESTConfigWith(o.Kubeconfig, o.KubeContext, o.RateLimits)
 	if err != nil {
 		return nil, err
 	}

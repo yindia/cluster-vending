@@ -26,7 +26,9 @@ import (
 //
 // The top-level "auth" section is not a setting: it is the API server's
 // authentication, read by LoadAuth; the top-level "naas" section is the
-// sub-tenant group rules, read by LoadNaaS. The top-level "nodeGroups" section is
+// sub-tenant group rules, read by LoadNaaS; the top-level "providers"
+// section is how the Crossplane providers run, read by LoadProviders. The
+// top-level "nodeGroups" section is
 // the platform admin's node group layout (nodeGroupsSection): its keys map
 // onto the node group settings, so a flag or variable still overrides one
 // value.
@@ -85,6 +87,9 @@ func flatten(n *yaml.Node, prefix string, out map[string]string) error {
 		}
 		if prefix == "" && key == SectionNaaS {
 			continue // not a setting: LoadNaaS reads it
+		}
+		if prefix == "" && key == SectionProviders {
+			continue // not a setting: LoadProviders reads it
 		}
 		if prefix == "" && key == SectionNodeGroups {
 			if err := flattenNodeGroups(n.Content[i+1], out); err != nil {

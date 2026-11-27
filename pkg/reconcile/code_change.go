@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/yindia/cluster-vending/pkg/config"
 	"github.com/yindia/cluster-vending/pkg/crossplane/sequence"
 	cloudv1 "github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1"
 )
@@ -17,6 +18,13 @@ import (
 // CodeRecoveries is how many failed applies of a code change are tried
 // again; the next failure halts it.
 const CodeRecoveries = 3
+
+// CodeConvergenceTimeout bounds how long a code change may stay applying
+// without converging (a resource Synced but never Ready, an observation
+// that never catches up) before it halts (CodeStalled), so its tier of the
+// rollout moves on. It is the default of the upgrade timeout: a code
+// change waits on the same cloud operations an upgrade does.
+const CodeConvergenceTimeout = config.DefaultUpgradeTimeout
 
 // CodeEpoch identifies this controller session. Networks must report the render
 // they observed in this session before any new network code rollout can start.
@@ -170,6 +178,21 @@ func CodeApplied(st *cloudv1.CodeChange, complete bool, failure error, at time.T
 	}
 	out.Message = "applying; waiting for the objects it holds back"
 	return out, nil
+}
+
+// CodeStalled halts a code change that has been applying for longer than
+// CodeConvergenceTimeout at at; why says what it still waits for. Any other
+// change is returned as it is, with no note.
+func CodeStalled(st *cloudv1.CodeChange, why string, at time.Time) (*cloudv1.CodeChange, *Note) {
+	if st.GetPhase() != cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_APPLYING || st.GetStartTime() == nil ||
+		at.Sub(st.GetStartTime().AsTime()) <= CodeConvergenceTimeout {
+		return st, nil
+	}
+	out := proto.CloneOf(st)
+	out.Phase = cloudv1.CodeChangePhase_CODE_CHANGE_PHASE_HALTED
+	out.Message = fmt.Sprintf("it did not converge within %s: %s", CodeConvergenceTimeout, why)
+	n := Warning(ReasonCodeChangeHalted, "the code change ("+out.GetSummary()+") halted: "+out.GetMessage())
+	return out, &n
 }
 
 // CodeStarted is the note of a code change whose turn came.

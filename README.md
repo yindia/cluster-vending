@@ -57,7 +57,7 @@ bin/cluster-vending tenant create acme
 bin/cluster-vending account create -f examples/cloudaccount.yaml   # prints the role stacks to create
 bin/cluster-vending account verify --id <BOOTSTRAP_ID> --tenant acme --wait
 bin/cluster-vending network create -f examples/network.yaml --wait
-bin/cluster-vending cluster create -f examples/cluster.yaml --wait
+bin/cluster-vending cluster create -f examples/cluster.yaml --wait   # adds you (your AWS identity) as a cluster admin
 ```
 
 The full setup, both AWS credential modes (your own keys, or assumed roles like

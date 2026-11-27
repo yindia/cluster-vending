@@ -226,6 +226,7 @@ Each layer has one job. The import rules were checked with `go list -deps`.
 | `pkg/controller/*`, `pkg/convert`, `pkg/owner`, `api/v1alpha1` | The custom resource types, the controllers, the manager, owner references, and the conversion between the typed spec and the contract. | Types import nothing from `pkg/`. |
 | `pkg/results`, `pkg/reconcile/resultsink` | Writes and reads a cluster's results objects in S3, with bounds and ETags. | The S3 client only. |
 | `pkg/naas`, `pkg/catalog`, `pkg/release` | Sub-tenant and Capsule logic, the shipped catalog and release, and their checks. | Kubernetes types and `pkg/`-level checks. |
+| `pkg/buildserial` | The build's serial, stamped on the CRDs, the shipped definitions and the shipped release, so an older build never writes over a newer one ([Runbook: upgrade and roll back the platform](#runbook-upgrade-and-roll-back-the-platform)). | The standard library only. |
 | `pkg/cli`, `pkg/cli/login`, `cmd/` | The CLI commands and the command tree. `cmd/` is thin. | `pkg/cli` imports only the generated client. |
 
 ### Storage
@@ -545,11 +546,12 @@ Rules that apply throughout:
   backoff pause on the releases it uninstalls, and recovers a stuck release. A
   pause set by an operator or a freeze is not lifted, and the stage waits and says so.
 - The load balancer stage ends after `--teardown-timeout` (default 15 m), and
-  the node group stage after the same time from the request. Each ends with a
-  `TeardownTimedOut` warning naming what is left, and the deletion goes on;
+  the node group stage after the same time from its start: one clock for its
+  pools, claims and classes, and for an API that does not answer. Each ends with
+  one `TeardownTimedOut` warning naming what is left, and the deletion goes on;
   the cloud sweep then deletes what they left in the account. The node group
-  stage's clock for an API that does not answer is kept in
-  `status.nodeTeardown`, so a controller restart does not start it again.
+  stage's start, and its timed-out finish, are kept in `status.nodeTeardown`, so
+  a controller restart neither starts its clock again nor warns again.
 - Whether the workload cluster is used is decided by trying, not by the EKS
   status alone: with a kubeconfig Secret and an EKS cluster that is `ACTIVE` or
   `UPDATING` (an upgrade), the API is called, and stages 1 and 4 retry a failing
@@ -761,19 +763,48 @@ controller manages it around that
   timed-out automatic upgrade. It answers per item what happens (`Retry`, `Fix`,
   `Nothing`).
 
-Provider runtime (`crossplaneaws.DefaultProviderRuntime`, not a setting): the
-AWS providers poll every 10 m (`provider-aws-ec2`: 30 m), provider-helm polls
-every 10 m (`DefaultHelmPoll`: only to catch drift; a spec change reaches it at
-once through its watch, and readiness is the platform's, so nothing waits for
-the poll), at most 10 reconciles a second per AWS provider and 50 for
-provider-helm, 1 CPU and 2 GiB requested, 4 CPU and 4 GiB limits, two replicas
-with leader election. The runtime configs are `cluster-vending-aws`,
-`cluster-vending-aws-ec2` and `cluster-vending-helm`. `--install-providers`
-leaves existing ones as they are, with one exception: a `cluster-vending-helm`
-still at the `--poll=15s` of earlier builds is moved to `--poll=10m0s` (only
-that argument; a poll tuned to any other value is kept). A provider-helm on
-another runtime config (for example the `cluster-vending-helm-observation`
-sample) is changed by whoever applied it.
+#### Provider runtime
+
+Each provider runs with its own DeploymentRuntimeConfig,
+`cluster-vending-<provider without "provider-">` (`cluster-vending-aws-ec2`,
+`cluster-vending-aws-eks`, ..., `cluster-vending-helm`), tuned by the settings
+file's `providers` section over the platform's defaults
+(`crossplaneaws.DefaultProviderRuntime`, the values the shipped files show):
+`defaults` apply to every provider, `overrides.<provider>` to one, field by
+field (`replicas`, `poll`, `maxReconcileRate`, `resources.requests|limits.cpu|memory`).
+
+| Provider | Poll | Rate | Requests | Limits |
+|---|---|---|---|---|
+| default (iam) | 10 m | 10/s | 200m, 512Mi | 1, 1Gi |
+| `provider-aws-ec2` | 30 m | 10/s | 500m, 1Gi | 2, 2Gi |
+| `provider-aws-eks` | 10 m | 10/s | 500m, 1Gi | 2, 2Gi |
+| kms, sqs, cloudwatchevents, cloudwatchlogs, s3 | 10 m | 10/s | 50m, 256Mi | 500m, 768Mi |
+| `provider-helm` | 10 m | 50/s | 100m, 256Mi | 1, 1Gi |
+
+One replica each, with leader election on, so `replicas: 2` gives a hot
+standby. Why: a provider that restarts loses nothing (it observes every
+resource again) and nothing waits on it within seconds, and the earlier
+1 CPU / 2Gi twice for every provider requested 18 CPUs and 36Gi for providers
+that mostly idle; EC2 and EKS hold the most resources and the largest schemas,
+KMS, SQS, EventBridge, CloudWatch Logs and S3 a few per cluster. The AWS rate
+stays at 10 (AWS throttling punishes the providers' 100); provider-helm reads
+only workload clusters, and its poll only catches drift (a spec change
+reaches it through its watch; readiness is the platform's). The EC2 poll may
+not exceed 30 m: the network's observation bound (`reconcile/network`) is
+derived from it.
+
+On every start (`--install-providers`, default true) the controller
+server-side applies each runtime config as the platform's field owner
+(`cluster-vending`), forcing ownership of the fields earlier builds wrote, so a
+new build's tuning or a changed section reaches existing installs. A field
+another field manager owns (an operator's `kubectl edit` or own apply: the
+replicas, the provider container's args, one resource quantity, the IRSA
+annotation) is left out of the apply and kept; the controller logs it. A
+missing Provider is created; an existing one only gets its `runtimeConfigRef`
+pointed at its own config (unless another manager set it), never a new
+package version. The shared `cluster-vending-aws` of earlier builds is
+deleted once no Provider uses it. A provider-helm on another runtime config
+(for example the `cluster-vending-helm-observation` sample) keeps it.
 
 ### Node layout
 
@@ -808,6 +839,21 @@ unknown hooks when it loads, and a test fails when the API's add-on names
 A `nodeSelector` or `tolerations` the tenant sets in an add-on's
 `configurationValues` wins. Without this, a cluster would never run those
 add-ons: the only other nodes are the tainted platform pool's.
+
+#### Network policy enforcement
+
+Every cluster's VPC CNI enforces NetworkPolicy: `addons.yaml` gives `vpc-cni`
+a `configuration` of `enableNetworkPolicy: "true"` and `nodeAgent.enabled: true`
+(confirmed with `describe-addon-configuration` from v1.16.0-eksbuild.1 to
+v1.23.3-eksbuild.2), on created and imported clusters alike (RenderVersion 12;
+an import's plan shows it as a `configurationValues` change). Without it the
+deny-by-default policies of sub-tenant isolation (`pkg/naas/assets/bootstrap.yaml`)
+are written but not enforced. Keys under `configuration` are written over the
+tenant's `configurationValues` for that add-on (objects merge key by key): the
+platform's win because they carry an isolation guarantee, and every other key
+the tenant set, nested ones included, stays. A configuration that is not a JSON
+or YAML object goes to EKS as it is, which refuses it on the add-on. A
+sub-tenant's access waits for enforcement (`NetworkPolicyReady`, below).
 
 **Install order.** A cluster's components install in two phases, on the pool
 they run on (`component.InstallPhase`):
@@ -982,6 +1028,13 @@ next minor, and `endOfSupport` is shown to users.
   the cluster renders as before once it moves to a channel's minor. An explicit
   `STANDARD` is refused, because AWS upgrades the control plane by force when
   standard support ends. Clusters on a channel's minor are unchanged.
+- If AWS upgraded a control plane by force anyway (a cluster left on
+  `STANDARD`), EKS reports a minor newer than the spec. The controller raises
+  the stored spec's `kubernetesVersion` to that minor (a new generation, its
+  add-on versions resolved again for it), warns with `ControlPlaneUpgradedByAWS`,
+  and the node groups and add-ons follow as in any upgrade. Rendering the older
+  minor would be a downgrade EKS refuses. EKS behind the spec (an upgrade under
+  way) or on its minor changes nothing.
 - An import of an EKS cluster on such a minor is read-only and is not checked.
   Taking it over is checked, because the platform renders the cluster from
   then on. A discovered `STANDARD` (or `Automatic`) is refused with the same
@@ -1080,7 +1133,13 @@ out like Kubernetes upgrades: per channel, in tier order, with the same
 `maxInProgress`, soak, halt and gates. A network goes once the rollout of every
 channel of its clusters reaches its tier. A failed apply is tried 3 times, then
 the change halts (`CodeChangeHalted`) until a newer build renders it otherwise or
-an update applies it. Objects of an owner are never removed by a code change;
+an update applies it. A network's change counts as applied only once its cloud
+resources converged on the new render. A resource the provider reports failed
+counts as a failed apply (3 recoveries, then halted), and a change still not
+converged 90 minutes after it started (the default of `--upgrade-timeout`;
+`reconcile.CodeConvergenceTimeout`), say a resource Synced but never Ready,
+halts with `did not converge within ...` in its message. The rollout counts a
+halted network as failed, so its tier moves on. Objects of an owner are never removed by a code change;
 a dropped object's cloud resource stays in place.
 
 The code-change fingerprint covers only the cluster's Crossplane objects
@@ -1090,7 +1149,8 @@ Helm releases. **Catalog changes** have their own fingerprint (PROP-01 4.7,
 `status.catalogChange.applied`, one fingerprint per platform definition (its
 values with the placeholders resolved, its charts, install timeout, `requires`
 and namespace; `component.CatalogFingerprint`) and one for the platform pool
-(`nodeGroups.platform`). Chart versions are the release's pins and are not part
+(`nodeGroups.platform`, and the tags its EC2NodeClass gives the nodes: the
+cluster's labels and the platform's tenant and cluster tags). Chart versions are the release's pins and are not part
 of it: a release move or a Kubernetes upgrade changes them under its own
 rollout. Sequence and IAM are not part of it either. A definition whose
 fingerprint differs, one added, or one removed (disabled, deleted, or switched
@@ -1203,17 +1263,32 @@ limited to reading objects in `cv-*` buckets (`results.ReadOnlySessionPolicy`).
 `MEMORY_CHANGE`) sort in memory after the filters. Their page tokens are bound to
 the sort as well as to the object's ETag; a request with the default sort makes and
 accepts the tokens it always did. The node, violation and event lists have the same
-fields plus `live_at`, `complete` and `notices`, and `GetNodeResources` exists, but
-the live reader that serves them is not built yet: the lists keep answering from the
-stored results with the default order, and ask for another sort or call
-`GetNodeResources` and the answer is `UNIMPLEMENTED`. `LiveUnavailableDetail` is the
-detail of the `UNAVAILABLE` a live read will return.
+fields plus `live_at`, `complete` and `notices`. The live reader (`cluster-vending
+live`) serves them and `GetNodeResources` (allocatable and requested CPU, memory and
+pods per node group and for the cluster) when the API server is configured with it;
+without one the lists answer from the stored results with the default order, and
+another sort or `GetNodeResources` answers `UNIMPLEMENTED`. `LiveUnavailableDetail` is
+the detail of the `UNAVAILABLE` of a cluster the live reader cannot read.
 
 **Targets.** Designed for 100 clusters of up to 1,000 nodes and 10,000 pods each.
 This is a design target: it has not been load tested
 ([Known limits](#7-known-limits)).
 
 ### Scanners
+
+The three scanners (policy, deprecated APIs, recommendations) each read
+`--scan-workers` clusters at once (default 4). A cluster whose `Reachable`
+condition is False is skipped until a probe succeeds: a GET of its API
+server's `/version` with a 5-second timeout, at most every 5 minutes per
+cluster (shared by the scanners). Without it every scanner spent its full
+timeout on each unreachable cluster, every pass.
+
+Workload clients (component rollouts, node groups, Helm recovery) are kept,
+one per cluster (`management.WorkloadCache`): each use reads the kubeconfig
+Secret, and the client (with its REST mapper and the discovery it learned) is
+reused while the kubeconfig is the same; a changed kubeconfig replaces it, an
+unreadable Secret (the cluster deleted) drops it, and so do 30 idle minutes;
+at most 256, the least recently used going first.
 
 **Cluster status summary** (`pkg/clustersummary`, `pkg/reconcile/cluster/summary.go`). The node pass
 (at most once a minute per cluster) sums the nodes it already reads per group and lists the pods once
@@ -1238,7 +1313,7 @@ evaluation-error results. A failed background result does not prove an admission
 was denied, and the event list is not a durable audit log.
 
 **Deprecated APIs** (`pkg/reconcile/deprecations`, `pkg/deprecation`). Every 6
-hours, and 15 minutes after a failed scan, one cluster at a time. The controller
+hours, and 15 minutes after a failed scan, `--scan-workers` clusters at a time. The controller
 reads the cluster with the kubeconfig Secret that the ClusterAuth writes, and may
 read Secrets in tenant namespaces only (through the `cluster-vending-kubeconfig-reader`
 binding). It is read-only: discovery, metadata-only lists of the kinds the rules
@@ -1450,6 +1525,14 @@ workload cluster. Its spec is described in [SubTenant](#subtenant). The controll
     removed from the list closes access with reason `GroupNotAllowed` and no
     RoleBinding is rendered. This bounds the group names, not the caller.
   - `OIDCReady`: an ACTIVE EKS OIDC association matches the cluster's OIDC.
+  - `NetworkPolicyReady`: the cluster's `vpc-cni` add-on is Ready and Synced and
+    EKS reports its configuration enforcing NetworkPolicy
+    ([network policy enforcement](#network-policy-enforcement)); the
+    deny-by-default policies of the isolation baseline hold nothing before. Until
+    then `AccessReady` is False with `NetworkPolicyPending`. Access that is already
+    open stays open (the gate is not pulled and the sub-tenant does not go
+    `Degraded`) while the add-on updates, or before an older render gains
+    enforcement: otherwise one add-on update would cut every sub-tenant's access.
   - The per-allocation checks: the Tenant equals its render (spec hash), every
     namespace exists with its UID, and each baseline is observed (`BaselineReady`).
   - Propagated namespace readiness and the exact generated RoleBindings. Only the
@@ -1598,7 +1681,7 @@ are marked so in the type; the rest can be updated.
 | `spec.controlPlane.kubernetesVersion` | `1.NN` | The minor. Empty on a cluster with a channel: the channel's minor is written into it. Empty on a cluster with no channel: the version it asks for, or EKS's default. The rollout sets it on automatic upgrades. |
 | `spec.controlPlane.endpointAccess` | object | `publicAccessCIDRs`, `privateAccess` (default true), `publicAccess` (default true). |
 | `spec.controlPlane.secretsEncryption` | object | `enabled` (a KMS key the platform creates and deletes) or `kmsKeyARN` (an existing key, not deleted). |
-| `spec.access` | object | `adminPrincipals` (cluster-admin), `accessEntries` (EKS entries and their policies, `Cluster` or `Namespace` scope), `oidc` ([Cluster OIDC](#cluster-oidc)). |
+| `spec.access` | object | `adminPrincipals` (cluster-admin; besides them only the platform's role is admin, and `cluster create` adds the caller's IAM principal unless `--no-self-admin`), `accessEntries` (EKS entries and their policies, `Cluster` or `Namespace` scope), `oidc` ([Cluster OIDC](#cluster-oidc)). |
 | `spec.releaseChannel` | `Alpha`, `Beta`, `Stable` | The channel the cluster takes platform releases from. |
 | `spec.upgradeMode` | `Manual` (default), `Automatic` | Whether platform releases and Kubernetes upgrades may move the cluster. |
 | `spec.maintenanceWindow` | `{days, start, duration}` | When an automatic upgrade may start: days (empty: every day), start in UTC (`HH:MM`), duration 1 h to 24 h. |
@@ -1815,9 +1898,9 @@ with JSON or binary bodies. Its services:
 
 | Service | RPCs |
 |---|---|
-| `TenantService` | `ListTenants`, `CreateTenant`, `Freeze`, `Unfreeze`, `GetFreeze`, `ListReleases`, `GetRelease`, `ListReleaseChannels`, `GetReleaseChannel`, `BootstrapTenant`, `GetCloudAccount`, `ListCloudAccounts`, `VerifyCloudAccount`, `DeleteCloudAccount`, `GetAccountOnboarding`, `WhoAmI` |
+| `TenantService` | `ListTenants`, `CreateTenant`, `DeleteTenant`, `Freeze`, `Unfreeze`, `GetFreeze`, `ListReleases`, `GetRelease`, `ListReleaseChannels`, `GetReleaseChannel`, `BootstrapTenant`, `GetCloudAccount`, `ListCloudAccounts`, `VerifyCloudAccount`, `DeleteCloudAccount`, `GetAccountOnboarding`, `WhoAmI` |
 | `NetworkService` | `CreateNetwork`, `ImportNetwork`, `TakeOverNetwork`, `GetNetwork`, `ListNetworks`, `UpdateNetwork`, `DeleteNetwork`, `ListNetworkEvents` |
-| `ClusterService` | `CreateCluster`, `ImportCluster`, `TakeOverCluster`, `GetCluster`, `ListClusters`, `UpdateCluster`, `DeleteCluster`, `RetryCluster`, `ListClusterEvents`, `ListClusterDeprecations`, `ListClusterRecommendations`, `ListClusterViolations`, `ListClusterViolationEvents`, `ListClusterNodeGroupManifests`, `ListNodeGroupNodes` |
+| `ClusterService` | `CreateCluster`, `ImportCluster`, `TakeOverCluster`, `GetCluster`, `ListClusters`, `UpdateCluster`, `DeleteCluster`, `RetryCluster`, `ListClusterEvents`, `ListClusterDeprecations`, `ListClusterRecommendations`, `ListClusterViolations`, `ListClusterViolationEvents`, `ListClusterNodeGroupManifests`, `ListNodeGroupNodes`, `GetNodeResources` |
 | `SubTenantService` | `CreateSubTenant`, `GetSubTenant`, `ListSubTenants`, `UpdateSubTenant`, `DeleteSubTenant` |
 | `ComponentService` | `ListComponentDefinitions`, `GetComponentValues`, `EnableComponent`, `UpdateComponent`, `DisableComponent`, `GetComponent`, `ListComponents` |
 | `AdminService` | `Freeze`, `Unfreeze`, `GetFreeze`, `ListReleases`, `GetRelease`, `ListReleaseChannels`, `GetReleaseChannel` |
@@ -1888,19 +1971,21 @@ Accepted by every command.
 | Lease namespace | `--lease-namespace` | `CV_LEASE_NAMESPACE` | `crossplane-system` | Namespace of the Lease in the management cluster |
 | Service account | `--service-account` | `CV_SERVICE_ACCOUNT` | empty | The controller's own service account. Each tenant namespace binds it to the kubeconfig reader role. Set by the Deployment; empty for a local run. |
 | Management role | `--aws-management-role-arn` | `CV_AWS_MANAGEMENT_ROLE_ARN` | required | The IAM role the Crossplane providers run as (IRSA). The management account is taken from it. |
-| Install providers | `--install-providers` | `CV_INSTALL_PROVIDERS` | `true` | On start, create the AWS providers, provider-helm and their runtime configs when missing. Existing ones are not changed. |
+| Install providers | `--install-providers` | `CV_INSTALL_PROVIDERS` | `true` | On every start, bring the providers and their runtime configs to this build and the `providers` section ([provider runtime](#provider-runtime)); fields set by another field manager are kept, existing providers keep their package version |
 | Install catalog | `--install-catalog` | `CV_INSTALL_CATALOG` | `true` | On start, create or update the shipped `ComponentDefinition`s ([catalog sync](#platform-components)) |
 | Recover stuck releases | `--recover-stuck-releases` | `CV_RECOVER_STUCK_RELEASES` | `true` | Roll back or uninstall a stuck Helm release, at most 3 times per component version |
 | Helm backoff cap | `--helm-backoff-max` | `CV_HELM_BACKOFF_MAX` | `30m` | Longest pause between attempts at a failed release (at least 1 m) |
 | Helm failure limit | `--helm-max-failures` | `CV_HELM_MAX_FAILURES` | `5` | Counted failures in a row before a component is `Failed` |
 | Recommendations | `--recommendations` | `CV_RECOMMENDATIONS` | `true` | Sample running clusters every 5 minutes. `false` records nothing. |
 | Reconcile workers | `--reconcile-workers` | `CV_RECONCILE_WORKERS` | `8` | Accounts, networks and clusters reconciled at once, per kind. One object is never reconciled twice at once. |
+| Scan workers | `--scan-workers` | `CV_SCAN_WORKERS` | `4` | Clusters each scanner (deprecated APIs, policy, recommendations) reads at once (at least 1). |
+| Management client rate | `--kube-qps`, `--kube-burst` | `CV_KUBE_QPS`, `CV_KUBE_BURST` | `50`, `100` | Client-side rate limits of the controller's clients of the management cluster (burst at least the rate). Each workload cluster's client has its own: 20, burst 40. |
 | Automatic upgrades | `--automatic-upgrades` | `CV_AUTOMATIC_UPGRADES` | `false` | `true` upgrades `Automatic` clusters, tier by tier. **Irreversible.** `false` plans and reports only. |
 | Upgrade timeout | `--upgrade-timeout` | `CV_UPGRADE_TIMEOUT` | `90m` | Stall timeout of one upgrade step, then `TimedOut` |
 | Teardown timeout | `--teardown-timeout` | `CV_TEARDOWN_TIMEOUT` | `15m` | How long a cluster's deletion waits for its load balancers and Karpenter nodes |
 | Provider credentials Secret | `--provider-credentials-secret` | `CV_PROVIDER_CREDENTIALS_SECRET` | empty | `<namespace>/<name>[:<key>]` (key default `credentials`): the providers and accounts use this shared credentials file instead of IRSA. Local kind only. |
 | Skip the tenant role | `--skip-tenant-role` | `CV_SKIP_TENANT_ROLE` | `false` | Local testing only, with the Secret: act with its keys, without assuming tenant roles |
-| Provider runtime | not settings | | | Poll intervals, reconcile rate and resources are fixed in `crossplaneaws.DefaultProviderRuntime`. Use `--install-providers=false` to manage the providers yourself. |
+| Provider runtime | the `providers` section | | the platform's | Replicas, poll, reconcile rate and resources per provider ([provider runtime](#provider-runtime)). `--install-providers=false` to manage the providers yourself. |
 
 **Catalog modes of `controller`.** Two read-only modes run no controller
 ([PROP-01](proposals/PROP-01-admin-configuration.md), phase 0):
@@ -2130,19 +2215,20 @@ tag of both.
 ### CLI
 
 The command tree is `cluster-vending [--server ...] <group> <verb>`. The groups
-`tenant`, `account`, `network`, `cluster`, `component`, `admin` and the
-commands `login`, `logout`, `whoami`, `serve`, `controller` are the complete set.
+`tenant`, `account`, `network`, `cluster`, `subtenant`, `component`, `admin` and the
+commands `login`, `logout`, `whoami`, `serve`, `controller`, `live` (the live reader,
+started for the API server; not for people) are the complete set.
 `--help` on each lists the flags. `-o table|wide|yaml|json` applies to every read.
 
 | Group | Verbs | Notes |
 |---|---|---|
-| `tenant` | `create <id>`, `list`, `freeze [--reason --until --wait]`, `freeze status`, `unfreeze [--wait]` | `list` needs no `--tenant`. Freezes are the tenant's own scope. |
+| `tenant` | `create <id>`, `list`, `delete <id> [--wait]`, `freeze [--reason --until --wait]`, `freeze status`, `unfreeze [--wait]` | `list` needs no `--tenant`. `delete` is refused, naming them, while the tenant has accounts, networks, clusters, components or sub-tenants; its namespace is unregistered and kept. Freezes are the tenant's own scope. |
 | `account` | `create -f`, `get --id`, `list`, `verify --id [--region ... --wait]`, `delete --id [--wait]` | `create` prints the role template's steps (or the trust, for a custom role). |
 | `network` | `create -f [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--wait]`, `import -f`, `takeover <id> [--wait]`, `events <id> [--only-warnings]` | `--plan` shows the changes without applying them. `--live` reads the status from the management cluster. |
-| `cluster` | `create -f [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--force] [--wait]`, `import -f`, `takeover <id> [--skip-platform-components] [--wait]`, `kubeconfig <id> [--print \| --oidc]`, `deprecations <id> [--only-removed --sort --order]`, `recommendations <id> [--namespace --only-changes --sort --order]`, `nodes <id> [--group --ready \| --not-ready --name --sort --order]`, `nodes <id> --manifests [--group]`, `violations <id> [--namespace --engine --sort --order]`, `violations <id> --events`, `events <id> [--only-warnings]`, `retry <id> [--component ... --upgrade]` | `--force` tears down without the API. `retry` answers per item. `nodes` reads every group the cluster reports unless `--group`; `--manifests` prints the platform pool's NodePool and EC2NodeClass YAML. `violations --events` is the policy and admission events of the last hour. `--sort` takes the list's keys in lower case (`cpu-requested-percent`, `cpu-change`); `--order` is `asc` or `desc`. |
+| `cluster` | `create -f [--no-self-admin] [--wait]`, `get <id> [--live]`, `list`, `update <id> -f [--plan]`, `delete <id> [--force] [--wait]`, `import -f`, `takeover <id> [--skip-platform-components] [--wait]`, `kubeconfig <id> [--print \| --oidc]`, `deprecations <id> [--only-removed --sort --order]`, `recommendations <id> [--namespace --only-changes --sort --order]`, `nodes <id> [--group --ready \| --not-ready --name --sort --order]`, `nodes <id> --manifests [--group]`, `versions [--channel]`, `violations <id> [--namespace --engine --sort --order]`, `violations <id> --events`, `events <id> [--only-warnings]`, `retry <id> [--component ... --upgrade]` | `--force` tears down without the API. `retry` answers per item. `get` shows the control plane's CloudWatch log group and its console link when control plane logging is on. `nodes` reads every group the cluster reports unless `--group`, and ends with each group's CPU and memory allocatable vs requested, read live (GetNodeResources); `--manifests` prints the platform pool's NodePool and EC2NodeClass YAML. `violations --events` is the policy and admission events of the last hour. `versions` lists the Kubernetes minors the channels' releases offer (default, upgrade target, end of support; a minor on no channel is extended support, Manual clusters only). `--sort` takes the list's keys in lower case (`cpu-requested-percent`, `cpu-change`); `--order` is `asc` or `desc`. |
 | `subtenant` | `create -f [--cluster] [--wait]`, `get <id> --cluster`, `list [--cluster]`, `update <id> -f [--wait]`, `delete <id> --cluster [--etag] [--wait]` | The console's SubTenant manifest: the cluster is `metadata.clusterId` or `--cluster`, the name is `spec.name`. `delete` reads the etag when `--etag` is not given and refuses while deletion protection is on. |
-| `component` | `catalog [--cluster]`, `template <name>`, `enable <name> --cluster [-f] [--validate-only] [--wait]`, `update <id> -f [--validate-only] [--etag]`, `disable <id> [--etag]`, `get <id> [--values]`, `list [--cluster] [--details]` | `template` prints the values file to start from. The version is not a flag. |
-| `admin` | `freeze [--platform \| --tenant \| --network \| --cluster] --reason [--until --wait --reset-exceptions]`, `freeze status`, `unfreeze [scope] [--wait]`, `release list`, `release get --id`, `channel list`, `channel get --id` | Platform admins only. Releases and channels are read-only. |
+| `component` | `catalog [--cluster]`, `template <name>`, `enable <name> --cluster [-f] [--validate-only] [--wait]`, `update <id> -f [--validate-only] [--etag]`, `disable <id> [--etag]`, `get <id> [--values]`, `list [--cluster] [--details]` | `template` prints the values file to start from. The version is not a flag. `catalog` and `get` show the IAM role the platform creates in the tenant account for a component (access, service accounts, policy). |
+| `admin` | `freeze [--platform \| --tenant \| --network \| --cluster] --reason [--until --wait --reset-exceptions]`, `freeze status`, `unfreeze [scope] [--wait]`, `release list`, `release get --id`, `channel list`, `channel get --id` | Operator commands; they take no `--tenant`. Releases and channels are read-only. |
 
 Manifests are the API's messages (`apiVersion: cluster-vending.io/v1`, kinds
 `CloudAccount`, `Network`, `NetworkImport`, `Cluster`, `ClusterImport`, `SubTenant`). `update -f`
@@ -2168,6 +2254,7 @@ list is in `pkg/reconcile/events.go`):
 | Network, Cluster | `CodeChangeStarted`, `CodeChangeFinished`, `CodeChangeHalted` | Normal, Normal, Warning | A code change rolls out, is applied, or halts. |
 | Cluster | `ControlPlaneActive`, `NodeGroupReady`, `AddonsReady` | Normal | Steps of creation. |
 | Cluster | `UpgradeStarted`, `UpgradeNodes`, `UpgradeStep`, `UpgradeFinished`, `UpgradeHalted` | Normal, Warning for halt | Steps of a Kubernetes upgrade. |
+| Cluster | `ControlPlaneUpgradedByAWS` | Warning | EKS runs a newer minor than the spec (AWS upgraded it by force at the end of support); the spec follows it. |
 | Cluster | `UpgradePaused`, `UpgradeResumed`, `UpgradeRetried` | Normal | An upgrade paused by a freeze or a paused resource, resumed, or retried. |
 | Cluster | `AddonRecovering`, `AddonUpgradeScheduled` | Warning, Normal | Add-ons that failed or did not settle, and the daily version check. |
 | Cluster | `AutomaticUpgradeStarted`, `AutomaticUpgradeSucceeded`, `AutomaticUpgradeFailed` | Normal, Normal, Warning | The rollout set a version, it finished, or it failed or stalled. |
@@ -2479,6 +2566,38 @@ Rollback: while everything is paused, nothing has changed in the cloud. Patch th
 packages back, wait until they are healthy, then continue from step 7 with the old
 build. After a resume, a rollback is another upgrade: pause again first.
 
+### Runbook: upgrade and roll back the platform
+
+Every build has a serial (`buildserial.Serial`). It is stamped
+(`cloud.cluster-vending.io/build-serial`) on the CRDs it installs, the component
+definitions it ships and its shipped release. A build never writes over a newer
+serial: a CRD of a newer build is not applied (its older schema would prune the
+newer fields of every stored object), a newer definition is neither replaced nor
+deleted, and channel `alpha` is not moved off a newer build's release. Each refusal
+is logged as an error, and the controller's `/readyz` fails (`build-serial`), so a
+rollout to an older build stops at its first pod. Builds of one serial are
+interchangeable.
+
+Upgrade:
+
+1. `cluster-vending admin freeze --reason "platform upgrade" --wait`.
+2. Deploy the new build. Its controller installs the CRDs and the catalog on start,
+   before leader election. Wait until every replica is ready.
+3. Watch: `admin channel get` for each channel, and the code and catalog changes
+   (`status.codeChange`, `status.catalogChange`) of a low-importance cluster.
+4. `admin unfreeze --cluster <id>` for one cluster, check it, then `admin unfreeze`
+   for the rest. Code and catalog changes then roll out per channel and tier.
+
+Roll back:
+
+- To a build of the same serial (a code fix, no CRD, definition or release change):
+  safe. Deploy it as an upgrade.
+- To an older serial: not supported. Its pods refuse to start ready, and while one
+  runs it reads newer objects with older types, so a write of it can drop fields it
+  does not know. Roll forward with a fix instead. If the older build must run, scale
+  the controller to 0, restore the CRDs, definitions and channels from a backup of
+  that build, and accept that status fields only the newer build knows are lost.
+
 ### Runbook: orphaned EKS name reservation
 
 A reservation (`cv-eks-name-*` ConfigMap in `kube-system`) is orphaned when its
@@ -2648,8 +2767,11 @@ What is not verified, or not built. Anything not on this list works as described
   not run against real AWS.
 - **Changing a cluster's labels rolls its platform pool.** The labels are tags of the
   EC2NodeClass `platform-pool`, and Karpenter treats a change of its tags as drift: it
-  replaces the pool's nodes within the pool's disruption budget. The first rollout of a
-  build that adds the tags does the same once for every cluster.
+  replaces the pool's nodes within the pool's disruption budget. The tags are part of
+  the pool's catalog fingerprint, so a label change, and the build that adds the tags,
+  is a catalog change: it waits for the cluster's turn in its channel's code rollout
+  (tiers, windows, freezes), and the pool keeps its old tags until then. A new cluster
+  gets them at once. The roll itself is not avoided.
 - **PersistentVolumeClaims are not deleted** with a cluster. The EBS volumes of a claim
   with a `Delete` reclaim policy are left in AWS, as an EKS deletion leaves them.
 - **A release's `default` minor is not applied.** A cluster on no channel keeps the
@@ -2668,7 +2790,10 @@ What is not verified, or not built. Anything not on this list works as described
 - **EKS name reservations** do not span independent management clusters, and an EKS
   cluster created in AWS by an actor outside this protocol is not detected by it. There is
   no atomic AWS and Kubernetes ownership transaction.
-- **The console** has no web OIDC login or token refresh: it uses an operator-supplied token.
-- **Stale references elsewhere in the repository** are not part of this document: some
-  comments in `examples/` name an older CLI command (`bootstrap create`) and must be read as
-  `account create`.
+- **No cost visibility.** The platform reports no spend per tenant or cluster. The nodes,
+  volumes and load balancers it and the cluster's controllers create carry the tags
+  `cluster-vending.io/tenant`, `cluster-vending.io/cluster` and
+  `cluster-vending.io/cluster-name`; activated as cost allocation tags in the tenant's
+  payer account, they let AWS Cost Explorer filter and group the spend by tenant and
+  cluster. The control plane's CloudWatch log group (`cluster get` shows it and a console
+  link when control plane logging is on) is billed to the tenant account as well.

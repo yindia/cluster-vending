@@ -28,6 +28,8 @@ const (
 	TenantServiceListTenantsProcedure = "/cloud.v1.TenantService/ListTenants"
 	// TenantServiceCreateTenantProcedure is the procedure name of the TenantService's CreateTenant RPC.
 	TenantServiceCreateTenantProcedure = "/cloud.v1.TenantService/CreateTenant"
+	// TenantServiceDeleteTenantProcedure is the procedure name of the TenantService's DeleteTenant RPC.
+	TenantServiceDeleteTenantProcedure = "/cloud.v1.TenantService/DeleteTenant"
 	// TenantServiceFreezeProcedure is the procedure name of the TenantService's Freeze RPC.
 	TenantServiceFreezeProcedure = "/cloud.v1.TenantService/Freeze"
 	// TenantServiceUnfreezeProcedure is the procedure name of the TenantService's Unfreeze RPC.
@@ -80,6 +82,14 @@ var (
 			StreamType:       connect.StreamTypeUnary,
 			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("CreateTenant"),
 			Procedure:        TenantServiceCreateTenantProcedure,
+			IdempotencyLevel: connect.IdempotencyIdempotent,
+		}
+	})
+	tenantServiceDeleteTenantSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType:       connect.StreamTypeUnary,
+			Schema:           v1.File_cloud_v1_tenant_service_proto.Services().ByName("TenantService").Methods().ByName("DeleteTenant"),
+			Procedure:        TenantServiceDeleteTenantProcedure,
 			IdempotencyLevel: connect.IdempotencyIdempotent,
 		}
 	})
@@ -202,6 +212,15 @@ type TenantServiceClient interface {
 	// Registers a cluster-scoped Tenant and its owned namespace. Does not create accounts, cloud
 	// resources or authorization grants, and never adopts an unmarked namespace.
 	CreateTenant(context.Context, *v1.CreateTenantRequest) (*v1.CreateTenantResponse, error)
+	// Deletes a tenant's registration. Refused with FAILED_PRECONDITION,
+	// naming what remains, while the tenant has cloud accounts, networks,
+	// clusters, components or sub-tenants: delete those first. Otherwise
+	// the Tenant CR is deleted; its finalizer (the tenant controller)
+	// unregisters the namespace tenant-<tenant_id> without deleting it or
+	// its contents, so a later CreateTenant of the same ID can take it back.
+	// NOT_FOUND for an unknown tenant; a tenant already being deleted
+	// answers as deleted.
+	DeleteTenant(context.Context, *v1.DeleteTenantRequest) (*v1.DeleteTenantResponse, error)
 	// Tenant-scoped dashboard operations. An omitted target means this tenant,
 	// never the platform; a network or cluster must belong to tenant_id.
 	Freeze(context.Context, *v1.TenantFreezeRequest) (*v1.FreezeResponse, error)
@@ -288,6 +307,15 @@ type TenantServiceHandler interface {
 	// Registers a cluster-scoped Tenant and its owned namespace. Does not create accounts, cloud
 	// resources or authorization grants, and never adopts an unmarked namespace.
 	CreateTenant(context.Context, *v1.CreateTenantRequest) (*v1.CreateTenantResponse, error)
+	// Deletes a tenant's registration. Refused with FAILED_PRECONDITION,
+	// naming what remains, while the tenant has cloud accounts, networks,
+	// clusters, components or sub-tenants: delete those first. Otherwise
+	// the Tenant CR is deleted; its finalizer (the tenant controller)
+	// unregisters the namespace tenant-<tenant_id> without deleting it or
+	// its contents, so a later CreateTenant of the same ID can take it back.
+	// NOT_FOUND for an unknown tenant; a tenant already being deleted
+	// answers as deleted.
+	DeleteTenant(context.Context, *v1.DeleteTenantRequest) (*v1.DeleteTenantResponse, error)
 	// Tenant-scoped dashboard operations. An omitted target means this tenant,
 	// never the platform; a network or cluster must belong to tenant_id.
 	Freeze(context.Context, *v1.TenantFreezeRequest) (*v1.FreezeResponse, error)
@@ -368,6 +396,7 @@ func RegisterTenantServiceHandler(server *connect.Server, svc TenantServiceHandl
 	server.Register(
 		connect.Method{Spec: tenantServiceListTenantsSpec(), Handler: adapter.listTenants},
 		connect.Method{Spec: tenantServiceCreateTenantSpec(), Handler: adapter.createTenant},
+		connect.Method{Spec: tenantServiceDeleteTenantSpec(), Handler: adapter.deleteTenant},
 		connect.Method{Spec: tenantServiceFreezeSpec(), Handler: adapter.freeze},
 		connect.Method{Spec: tenantServiceUnfreezeSpec(), Handler: adapter.unfreeze},
 		connect.Method{Spec: tenantServiceGetFreezeSpec(), Handler: adapter.getFreeze},
@@ -394,6 +423,10 @@ func (UnimplementedTenantServiceHandler) ListTenants(context.Context, *v1.ListTe
 
 func (UnimplementedTenantServiceHandler) CreateTenant(context.Context, *v1.CreateTenantRequest) (*v1.CreateTenantResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.CreateTenant is not implemented")
+}
+
+func (UnimplementedTenantServiceHandler) DeleteTenant(context.Context, *v1.DeleteTenantRequest) (*v1.DeleteTenantResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "cloud.v1.TenantService.DeleteTenant is not implemented")
 }
 
 func (UnimplementedTenantServiceHandler) Freeze(context.Context, *v1.TenantFreezeRequest) (*v1.FreezeResponse, error) {
@@ -467,6 +500,14 @@ func (c *tenantServiceClient) ListTenants(ctx context.Context, req *v1.ListTenan
 func (c *tenantServiceClient) CreateTenant(ctx context.Context, req *v1.CreateTenantRequest) (*v1.CreateTenantResponse, error) {
 	var res v1.CreateTenantResponse
 	if err := c.client.CallUnary(ctx, tenantServiceCreateTenantSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *tenantServiceClient) DeleteTenant(ctx context.Context, req *v1.DeleteTenantRequest) (*v1.DeleteTenantResponse, error) {
+	var res v1.DeleteTenantResponse
+	if err := c.client.CallUnary(ctx, tenantServiceDeleteTenantSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -604,6 +645,18 @@ func (h tenantServiceHandler) createTenant(ctx context.Context, _ connect.Spec, 
 		return err
 	}
 	res, err := h.svc.CreateTenant(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h tenantServiceHandler) deleteTenant(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.DeleteTenantRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.DeleteTenant(ctx, &req)
 	if err != nil {
 		return err
 	}

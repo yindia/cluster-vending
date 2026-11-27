@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
+	"github.com/yindia/cluster-vending/pkg/buildserial"
 	"github.com/yindia/cluster-vending/pkg/catalog"
 	"github.com/yindia/cluster-vending/pkg/config"
 	reconcilers "github.com/yindia/cluster-vending/pkg/controller"
@@ -64,11 +65,14 @@ type Options struct {
 	// each tenant namespace to the kubeconfig reader role; nil outside the
 	// cluster.
 	ServiceAccount *config.ServiceAccountRef
-	// InstallProviders creates the Crossplane providers, provider-helm and
-	// the activation policy when missing, running as the platform's
-	// defaults (crossplaneaws.DefaultProviderRuntime) and as the management
-	// role.
+	// InstallProviders brings the Crossplane providers, provider-helm,
+	// their runtime configs and the activation policy to this build on
+	// every start (crossplaneaws.InstallProviders), running as the
+	// platform's defaults (crossplaneaws.DefaultProviderRuntime) with
+	// Providers over them, and as the management role.
 	InstallProviders bool
+	// Providers is the config file's providers section (config.Providers).
+	Providers config.Providers
 	// InstallCatalog creates the shipped component definitions
 	// (pkg/catalog/definitions) that are missing, once the platform's kinds are
 	// served; existing ones are never changed.
@@ -96,6 +100,12 @@ type Options struct {
 	// ReconcileWorkers is how many accounts, networks and clusters of each
 	// kind are reconciled at once (0: one).
 	ReconcileWorkers int
+	// ScanWorkers is how many clusters each scanner reads at once (0: one).
+	ScanWorkers int
+	// KubeQPS and KubeBurst are the management clients' rate limits (0:
+	// kube.DefaultQPS and kube.DefaultBurst).
+	KubeQPS   float32
+	KubeBurst int
 	// AutomaticUpgrades: upgrade automatic clusters to their channel's
 	// Kubernetes minor; off, the rollout is planned and reported only.
 	AutomaticUpgrades bool
@@ -131,6 +141,12 @@ func Setup(mgr manager.Manager, d Deps) error {
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		return fmt.Errorf("controller ready check: %w", err)
 	}
+	// Not ready while this build refused to write over what a newer build
+	// installed (CRDs, catalog, the shipped release): a rollout to an older
+	// build stops at its first pod.
+	if err := mgr.AddReadyzCheck("build-serial", buildserial.Check); err != nil {
+		return fmt.Errorf("controller build serial check: %w", err)
+	}
 	return nil
 }
 
@@ -151,9 +167,16 @@ func Run(ctx context.Context, o Options) error {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
+	limits := kube.RateLimits{QPS: o.KubeQPS, Burst: o.KubeBurst}
+	runtime := providerRuntime(o.AWS, o.Providers)
+	// A providers section the renderer refuses stops the start, also
+	// without --install-providers: the file says something wrong.
+	if _, err := crossplaneaws.RuntimeConfigs(runtime); err != nil {
+		return fmt.Errorf("the config file's %s section: %w", config.SectionProviders, err)
+	}
 	options := management.Options{
-		Kubeconfig: o.Kubeconfig, KubeContext: o.KubeContext, Logger: logger,
-		InstallProviders: o.InstallProviders, ProviderRuntime: providerRuntime(o.AWS), InstallKinds: true,
+		Kubeconfig: o.Kubeconfig, KubeContext: o.KubeContext, Logger: logger, RateLimits: limits,
+		InstallProviders: o.InstallProviders, ProviderRuntime: runtime, InstallKinds: true,
 		LeaderElection:     kube.LeaderElection{Enabled: o.LeaderElect, Namespace: o.LeaseNamespace},
 		WatchPlatformKinds: true, LeaseName: leaseName, MetricsAddr: o.MetricsAddr, ProbeAddr: o.ProbeAddr,
 	}
@@ -166,7 +189,7 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return fmt.Errorf("%w (--install-providers=false skips installing the providers)", err)
 	}
-	cfg, err := kube.RESTConfig(o.Kubeconfig, o.KubeContext)
+	cfg, err := kube.RESTConfigWith(o.Kubeconfig, o.KubeContext, limits)
 	if err != nil {
 		return err
 	}
@@ -187,6 +210,10 @@ func Run(ctx context.Context, o Options) error {
 			logger.Info("component definitions edited by the platform team are kept as they are; delete one and restart to take this build's",
 				"definitions", res.Edited)
 		}
+		if len(res.Newer) > 0 {
+			logger.Error("component definitions a newer build shipped are NOT synced: this build is older; run the newer build",
+				"definitions", res.Newer, "build_serial", buildserial.Serial)
+		}
 		if len(res.Foreign) > 0 {
 			logger.Warn("component definitions differ from this build's and were not shipped by it: kept; kubectl replace -f pkg/catalog/definitions/<name>.yaml, or delete and restart, to take this build's",
 				"definitions", res.Foreign)
@@ -202,6 +229,10 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
+	// One client per workload cluster, kept between passes (rebuilt when
+	// its kubeconfig Secret changes): every pass building one ran
+	// discovery against the workload API server again.
+	workloads := management.NewWorkloadCache(direct, management.WorkloadCacheOptions{})
 	reconciling := management.WithAWSClient(reconcile.Deps{
 		Store:                    store,
 		Kube:                     mgr.GetClient(), // reads from the informer cache
@@ -215,10 +246,10 @@ func Run(ctx context.Context, o Options) error {
 		// Workload clusters, reached with their kubeconfig Secrets (read at
 		// the API server, in tenant namespaces only): to recover a stuck
 		// Helm release of a platform component.
-		Workloads:        management.Workloads(direct),
-		NodeGroupClients: management.WorkloadClients(direct),
+		Workloads:        workloads,
+		NodeGroupClients: workloads,
 		// The same, to read whether a component's workloads rolled out.
-		Rollouts:             management.WorkloadClients(direct),
+		Rollouts:             workloads,
 		SubTenantWorkloads:   management.SubTenantWorkloads(direct),
 		RecoverStuckReleases: o.RecoverStuckReleases,
 		HelmBackoffMax:       o.HelmBackoffMax,
@@ -240,8 +271,8 @@ func Run(ctx context.Context, o Options) error {
 	// (docs/architecture.md#metrics-and-alerts).
 	reconciling.Events = reconcilers.NewEvents(mgr.GetEventRecorder(reconcilers.EventsName), mgr.GetClient()).Counted(transitions)
 	reconciling.Metrics = transitions
-	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers, AutomaticUpgrades: o.AutomaticUpgrades,
-		UpgradeTimeout: o.UpgradeTimeout}
+	deps := Deps{Direct: direct, Deps: reconciling, Workers: o.ReconcileWorkers, ScanWorkers: o.ScanWorkers,
+		AutomaticUpgrades: o.AutomaticUpgrades, UpgradeTimeout: o.UpgradeTimeout}
 	if err := Setup(mgr, deps); err != nil {
 		return err
 	}
@@ -259,7 +290,7 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	logger.Info("controller manager started", "leader_elect", o.LeaderElect, "render_target", renderTarget,
-		"reconcile_workers", o.ReconcileWorkers)
+		"reconcile_workers", o.ReconcileWorkers, "scan_workers", o.ScanWorkers, "kube_qps", cfg.QPS, "kube_burst", cfg.Burst)
 	if err := <-done; err != nil {
 		return fmt.Errorf("controller manager: %w", err)
 	}
@@ -283,14 +314,21 @@ func checkCredentialsSecret(ctx context.Context, d reconcile.Deps, logger *slog.
 	}
 }
 
-// providerRuntime is how the controller installs the AWS providers: the
-// platform's defaults, running as the management role (IRSA). Other values
-// mean managing the provider objects outside the platform
-// (--install-providers=false).
-func providerRuntime(a config.AWS) crossplaneaws.ProviderRuntime {
-	rt := crossplaneaws.DefaultProviderRuntime()
-	rt.ManagementRoleARN = a.ManagementRoleARN
-	return rt
+// providerRuntime is how the controller installs the providers: the
+// platform's defaults with the config file's providers section over them
+// (its defaults for every provider, its overrides per provider), the AWS
+// ones running as the management role (IRSA).
+func providerRuntime(a config.AWS, p config.Providers) crossplaneaws.ProviderRuntime {
+	tuning := func(s config.ProviderSettings) crossplaneaws.ProviderTuning {
+		return crossplaneaws.ProviderTuning{Replicas: s.Replicas, Poll: s.Poll, MaxReconcileRate: s.MaxReconcileRate,
+			CPURequest: s.CPURequest, MemoryRequest: s.MemoryRequest, CPULimit: s.CPULimit, MemoryLimit: s.MemoryLimit}
+	}
+	configured := crossplaneaws.ProviderRuntime{ManagementRoleARN: a.ManagementRoleARN, Default: tuning(p.Defaults),
+		Providers: map[string]crossplaneaws.ProviderTuning{}}
+	for name, s := range p.Overrides {
+		configured.Providers[name] = tuning(s)
+	}
+	return crossplaneaws.DefaultProviderRuntime().Over(configured)
 }
 
 // serviceAccount is the controller's service account as the reconcilers

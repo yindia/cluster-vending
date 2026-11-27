@@ -42,13 +42,14 @@ func ComponentCatalog(ctx context.Context, c Clients, o Options) (proto.Message,
 	if err != nil || !isTable(o.Output) {
 		return res, err
 	}
-	header := []string{"NAME", "PROVIDER", "MANAGED BY", "CONFIGURABLE", "REQUIRES", "DESCRIPTION"}
+	header := []string{"NAME", "PROVIDER", "MANAGED BY", "CONFIGURABLE", "IAM ROLE", "REQUIRES", "DESCRIPTION"}
 	if o.Cluster != "" {
-		header = []string{"NAME", "PROVIDER", "MANAGED BY", "CONFIGURABLE", "VERSION", "REQUIRES", "DESCRIPTION"}
+		header = []string{"NAME", "PROVIDER", "MANAGED BY", "CONFIGURABLE", "IAM ROLE", "VERSION", "REQUIRES", "DESCRIPTION"}
 	}
 	var rows [][]string
 	for _, d := range res.(*cloudv1.ListComponentDefinitionsResponse).GetDefinitions() {
-		cols := []string{d.GetName(), cloudOf(d.GetProvider()), managedBy(d.GetManagement()), yesNo(d.GetConfigurable())}
+		cols := []string{d.GetName(), cloudOf(d.GetProvider()), managedBy(d.GetManagement()), yesNo(d.GetConfigurable()),
+			iamRoleSummary(d.GetCloudResources().GetIamRole())}
 		if o.Cluster != "" {
 			version := none
 			for _, v := range d.GetVersions() {
@@ -270,6 +271,12 @@ func ComponentGet(ctx context.Context, c Clients, o Options) (proto.Message, err
 		return nil, err
 	}
 	component := res.(*cloudv1.GetComponentResponse).GetComponent()
+	if !o.Values && isTable(o.Output) {
+		if err := describeComponent(o.Out, component); err != nil {
+			return nil, err
+		}
+		return nil, componentIAMRole(ctx, c, o, component)
+	}
 	if !o.Values {
 		return component, nil
 	}

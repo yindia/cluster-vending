@@ -4,16 +4,8 @@
 package aws
 
 import (
-	"fmt"
-	"time"
-
 	xpv2 "github.com/crossplane/crossplane/apis/v2/core/v2"
-	pkgv1 "github.com/crossplane/crossplane/apis/v2/pkg/v1"
-	pkgv1beta1 "github.com/crossplane/crossplane/apis/v2/pkg/v1beta1"
 	awsv1beta1 "github.com/upbound/provider-aws/v2/apis/namespaced/v1beta1"
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -70,26 +62,14 @@ const ProviderVersion = "v2.9.0"
 //	   release's workloads available, within the install timeout); the
 //	   wait is part of the Release digest (helmrel.Spec.Wait), so every
 //	   Release is written once more
-const RenderVersion = 11
-
-// ProviderPackages are the provider-upjet-aws service providers the
-// platform needs; the family provider comes as their dependency.
-// provider-aws-sqs and provider-aws-cloudwatchevents are for Karpenter's
-// interruption queue and the EventBridge rules feeding it (karpenter.go).
-// provider-aws-s3 is for the bucket of a cluster's scan results
-// (results_bucket.go, docs/architecture.md#results-in-s3).
-var ProviderPackages = []string{"provider-aws-ec2", "provider-aws-eks", "provider-aws-iam", "provider-aws-cloudwatchlogs",
-	"provider-aws-kms", "provider-aws-sqs", "provider-aws-cloudwatchevents", "provider-aws-s3"}
+//	12 vpc-cni enforces NetworkPolicy on every cluster (imported ones
+//	   too): enableNetworkPolicy "true" and nodeAgent.enabled true in its
+//	   configurationValues, written over the tenant's (configuration in
+//	   addons.yaml, addon_configuration.go). Sub-tenant isolation relies
+//	   on it; a sub-tenant's access waits for it
+const RenderVersion = 12
 
 const (
-	// RuntimeConfigName is the DeploymentRuntimeConfig the AWS providers
-	// run with; RuntimeConfigEC2Name the one of provider-aws-ec2;
-	// RuntimeConfigHelmName the one of provider-helm.
-	RuntimeConfigName     = "cluster-vending-aws"
-	RuntimeConfigEC2Name  = "cluster-vending-aws-ec2"
-	RuntimeConfigHelmName = "cluster-vending-helm"
-	providerEC2           = "provider-aws-ec2"
-
 	// irsaRoleAnnotation is read by the EKS pod identity webhook.
 	irsaRoleAnnotation = "eks.amazonaws.com/role-arn"
 	// The open-source builds of provider-upjet-aws (same code as Upbound's).
@@ -99,182 +79,6 @@ const (
 // credentialsSourceIRSA is the AWS-only credentials source; Crossplane core
 // has no constant for it.
 const credentialsSourceIRSA xpv2.CredentialsSource = "IRSA"
-
-// runtimeContainer is the provider container in a package's Deployment.
-const runtimeContainer = "package-runtime"
-
-// ProviderRuntime is how the AWS providers' pods run.
-type ProviderRuntime struct {
-	// ManagementRoleARN is the role the providers authenticate as on EKS
-	// (IRSA: an annotation on their service account). Empty: none (local
-	// clusters, credentials from the ProviderConfig Secret).
-	ManagementRoleARN string
-	// Poll is how often an AWS provider checks each resource for drift; EC2Poll
-	// the same for provider-aws-ec2, whose network resources are many and
-	// change rarely. HelmPoll is provider-helm's, apart from the AWS ones;
-	// zero: DefaultHelmPoll.
-	Poll, EC2Poll, HelmPoll time.Duration
-	// MaxReconcileRate caps a provider's reconciles per second (and so its
-	// AWS API calls).
-	MaxReconcileRate int
-	// HelmMaxReconcileRate caps provider-helm's (no AWS calls); zero: 50.
-	HelmMaxReconcileRate int
-	// Resource requests and limits of a provider's container (quantities;
-	// empty: none).
-	CPURequest, MemoryRequest, CPULimit, MemoryLimit string
-	// Replicas of each provider's Deployment (0: Crossplane's default,
-	// one). The providers run with leader election (--leader-election), so
-	// only one replica reconciles; the others are hot standbys that take
-	// over the lease when it dies, without waiting for a new pod.
-	Replicas int32
-}
-
-// DefaultProviderRuntime is the providers' runtime for ~100 clusters of
-// ~80 managed resources each on one management cluster. Poll 10m (the
-// providers' own default), 30m for EC2's many, rarely changing network
-// resources, and DefaultHelmPoll for provider-helm. At most 10 reconciles
-// a second per AWS provider (the providers default to 100, which AWS API
-// throttling punishes at this size) and 50 for provider-helm, which reads
-// only the workload clusters (defaultHelmMaxReconcileRate). Two replicas
-// with leader election: one active, one hot standby.
-func DefaultProviderRuntime() ProviderRuntime {
-	return ProviderRuntime{Poll: 10 * time.Minute, EC2Poll: DefaultEC2Poll, HelmPoll: DefaultHelmPoll, MaxReconcileRate: 10, HelmMaxReconcileRate: defaultHelmMaxReconcileRate,
-		CPURequest: "1", MemoryRequest: "2Gi", CPULimit: "4", MemoryLimit: "4Gi", Replicas: 2}
-}
-
-const (
-	// DefaultEC2Poll is how often provider-aws-ec2 checks each resource
-	// unasked (DefaultProviderRuntime). Whatever waits for that provider
-	// to have observed a change without a signal from it (the network's
-	// observation bound) is derived from it.
-	DefaultEC2Poll = 30 * time.Minute
-	// DefaultHelmPoll is how often provider-helm looks at each Release
-	// unasked: only to catch drift in a workload cluster. A spec change
-	// (a new digest, a retry's annotation, a pause lifted) is reconciled
-	// at once through provider-helm's watch, and the platform judges a
-	// rollout itself (wait: false; the controller reads the workloads),
-	// so nothing waits for this poll. Each poll is a remote Helm status
-	// call: at 15s, ~13 Releases on 100 clusters made ~85 a second.
-	DefaultHelmPoll = 10 * time.Minute
-	// legacyHelmPoll is the poll earlier builds gave provider-helm's runtime
-	// config: InstallProviders moves an existing config still at it to
-	// DefaultHelmPoll (install.go).
-	legacyHelmPoll = 15 * time.Second
-	// defaultHelmMaxReconcileRate caps provider-helm's reconciles a second.
-	// Kept at 50: it bounds bursts (a fleet-wide release move rewrites
-	// ~1300 Releases, done in about 25s), and with wait: false a reconcile
-	// takes seconds, not minutes, so the cap no longer ties up workers. The
-	// steady load is set by the poll, not by this cap.
-	defaultHelmMaxReconcileRate = 50
-)
-
-// leaderElectionArg turns on leader election in provider-upjet-aws
-// (v2.9.0) and provider-helm (v1.5.0): both read the same flag (default
-// false). Without it two replicas would both reconcile every resource.
-const leaderElectionArg = "--leader-election"
-
-// RuntimeConfigs are the DeploymentRuntimeConfigs of the providers:
-// RuntimeConfigName for the AWS providers, RuntimeConfigEC2Name (its own
-// poll interval) for provider-aws-ec2, and RuntimeConfigHelmName for
-// provider-helm (no AWS identity: it reaches the workload clusters with
-// their kubeconfigs). Cluster-scoped and shared by every tenant.
-func RuntimeConfigs(rt ProviderRuntime) ([]*pkgv1beta1.DeploymentRuntimeConfig, error) {
-	if rt.HelmPoll < 0 {
-		return nil, fmt.Errorf("provider Helm poll interval must be positive")
-	}
-	if rt.HelmPoll == 0 {
-		rt.HelmPoll = DefaultHelmPoll
-	}
-	resources, err := rt.resources()
-	if err != nil {
-		return nil, err
-	}
-	helmRate := rt.HelmMaxReconcileRate
-	if helmRate <= 0 {
-		helmRate = defaultHelmMaxReconcileRate
-	}
-	config := func(name string, poll time.Duration, rate int, irsa bool) *pkgv1beta1.DeploymentRuntimeConfig {
-		spec := &appsv1.DeploymentSpec{
-			Selector: &metav1.LabelSelector{}, // required by the type; Crossplane sets it
-			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{
-				Name: runtimeContainer, Resources: resources,
-				Args: []string{"--poll=" + poll.String(), fmt.Sprintf("--max-reconcile-rate=%d", rate), leaderElectionArg},
-			}}}},
-		}
-		if rt.Replicas > 0 {
-			spec.Replicas = ptr.To(rt.Replicas)
-		}
-		c := &pkgv1beta1.DeploymentRuntimeConfig{
-			TypeMeta:   metav1.TypeMeta{APIVersion: pkgv1beta1.SchemeGroupVersion.String(), Kind: pkgv1beta1.DeploymentRuntimeConfigKind},
-			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: crossplane.Labels("")},
-			Spec:       pkgv1beta1.DeploymentRuntimeConfigSpec{DeploymentTemplate: &pkgv1beta1.DeploymentTemplate{Spec: spec}},
-		}
-		if irsa && rt.ManagementRoleARN != "" {
-			c.Spec.ServiceAccountTemplate = &pkgv1beta1.ServiceAccountTemplate{Metadata: &pkgv1beta1.ObjectMeta{
-				Annotations: map[string]string{irsaRoleAnnotation: rt.ManagementRoleARN}}}
-		}
-		return c
-	}
-	return []*pkgv1beta1.DeploymentRuntimeConfig{config(RuntimeConfigName, rt.Poll, rt.MaxReconcileRate, true), config(RuntimeConfigEC2Name, rt.EC2Poll, rt.MaxReconcileRate, true),
-		config(RuntimeConfigHelmName, rt.HelmPoll, helmRate, false)}, nil
-}
-
-// HelmProvider is provider-helm (crossplane.HelmProvider) running with
-// RuntimeConfigHelmName.
-func HelmProvider() *pkgv1.Provider {
-	p := crossplane.HelmProvider()
-	p.Spec.RuntimeConfigReference = &pkgv1.RuntimeConfigReference{Name: RuntimeConfigHelmName}
-	return p
-}
-
-func (rt ProviderRuntime) resources() (corev1.ResourceRequirements, error) {
-	out := corev1.ResourceRequirements{}
-	for _, q := range []struct {
-		list  *corev1.ResourceList
-		name  corev1.ResourceName
-		value string
-	}{
-		{&out.Requests, corev1.ResourceCPU, rt.CPURequest}, {&out.Requests, corev1.ResourceMemory, rt.MemoryRequest},
-		{&out.Limits, corev1.ResourceCPU, rt.CPULimit}, {&out.Limits, corev1.ResourceMemory, rt.MemoryLimit},
-	} {
-		if q.value == "" {
-			continue
-		}
-		quantity, err := resource.ParseQuantity(q.value)
-		if err != nil {
-			return out, fmt.Errorf("provider %s %q: %w", q.name, q.value, err)
-		}
-		if *q.list == nil {
-			*q.list = corev1.ResourceList{}
-		}
-		(*q.list)[q.name] = quantity
-	}
-	return out, nil
-}
-
-// Providers are the Provider packages of ProviderPackages at
-// ProviderVersion, each running with its runtime config (RuntimeConfigs).
-// Cluster-scoped and shared by every tenant.
-func Providers() []*pkgv1.Provider {
-	out := make([]*pkgv1.Provider, 0, len(ProviderPackages))
-	for _, name := range ProviderPackages {
-		config := RuntimeConfigName
-		if name == providerEC2 {
-			config = RuntimeConfigEC2Name
-		}
-		out = append(out, &pkgv1.Provider{
-			TypeMeta:   metav1.TypeMeta{APIVersion: pkgv1.SchemeGroupVersion.String(), Kind: pkgv1.ProviderKind},
-			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: crossplane.Labels("")},
-			Spec: pkgv1.ProviderSpec{
-				PackageSpec: pkgv1.PackageSpec{Package: awsPackageRegistry + name + ":" + ProviderVersion},
-				PackageRuntimeSpec: pkgv1.PackageRuntimeSpec{
-					RuntimeConfigReference: &pkgv1.RuntimeConfigReference{Name: config},
-				},
-			},
-		})
-	}
-	return out
-}
 
 // CredentialsSecret names the Secret key that holds AWS keys in the
 // shared credentials file format ([default] aws_access_key_id = ...): the

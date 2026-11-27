@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -15,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudv1alpha1 "github.com/yindia/cluster-vending/api/v1alpha1"
+	"github.com/yindia/cluster-vending/pkg/buildserial"
 	"github.com/yindia/cluster-vending/pkg/catalog"
 	"github.com/yindia/cluster-vending/pkg/component"
 	crossplaneaws "github.com/yindia/cluster-vending/pkg/crossplane/aws"
@@ -71,7 +73,8 @@ func DefaultRelease() *cloudv1alpha1.Release {
 	return &cloudv1alpha1.Release{
 		TypeMeta: metav1.TypeMeta{APIVersion: cloudv1alpha1.GroupVersion.String(), Kind: "Release"},
 		ObjectMeta: metav1.ObjectMeta{Name: DefaultReleaseName,
-			Labels: map[string]string{cloudv1alpha1.LabelShipped: "true"}},
+			Labels:      map[string]string{cloudv1alpha1.LabelShipped: "true"},
+			Annotations: buildserial.Stamp(nil)},
 		Spec: cloudv1alpha1.ReleaseSpec{Notes: shippedNotes, Content: defaultContent()},
 	}
 }
@@ -177,8 +180,9 @@ func asShipped(spec cloudv1alpha1.ReleaseChannelSpec) bool {
 }
 
 // takeOverAlpha points alpha at this build's shipped release when alpha is
-// exactly what a build made it: Pinned to a shipped release (isShipped),
-// with nothing else set. Then no operator has taken alpha over, and the
+// exactly what a build made it: Pinned to a shipped release (isShipped)
+// of this build's serial or an older one (buildserial), with nothing else
+// set. Then no operator has taken alpha over, and the
 // new build's versions must reach the channels. Anything else is the
 // operator's and stays: another promotion, a pause, a rollout policy, a
 // release they published, or a release that no longer exists.
@@ -196,6 +200,14 @@ func takeOverAlpha(ctx context.Context, c client.Client) error {
 		return client.IgnoreNotFound(err)
 	}
 	if !isShipped(rel) {
+		return nil
+	}
+	// A newer build shipped it: an older build (a rollback, an old pod)
+	// never moves alpha back to its own versions.
+	if newer, serial := buildserial.Newer(rel.Annotations); newer {
+		buildserial.Refuse("channel alpha's Release "+current, serial)
+		slog.ErrorContext(ctx, "NOT moving channel alpha off a newer build's shipped release: this build is older; run the newer build",
+			"release", current, "release_serial", serial, "build_serial", buildserial.Serial)
 		return nil
 	}
 	alpha.Spec.Release = DefaultReleaseName

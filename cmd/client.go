@@ -35,8 +35,8 @@ type verb struct {
 	recommend bool
 	// sort adds --sort (its values, for the help) and --order.
 	sort string
-	// nodes adds --group, --ready, --not-ready, --name, --manifests and
-	// --options; violations --namespace, --engine and --events.
+	// nodes adds --group, --ready, --not-ready, --name and --manifests;
+	// violations --namespace, --engine and --events.
 	nodes, violations bool
 	// until adds --until; letThrough adds --cluster and --network.
 	until, letThrough bool
@@ -48,6 +48,10 @@ type verb struct {
 	idHelp string
 	// management adds --management (account create).
 	management bool
+	// channel adds --channel (cluster versions).
+	channel bool
+	// selfAdmin adds --no-self-admin (cluster create).
+	selfAdmin bool
 }
 
 // crud returns the create/get/list/update/delete verbs of a resource whose
@@ -65,6 +69,11 @@ func crud(noun, kind string, create, get, list, update, del cli.Command) []verb 
 	}
 }
 
+// adminGroups are the command groups of AdminService: they take no
+// --tenant and ignore $CV_TENANT (admin, and its release and
+// channel subgroups).
+var adminGroups = map[string]bool{"admin": true, "release": true, "channel": true}
+
 // newResourceCmd returns a command group calling the API. Every verb takes
 // --tenant (or metadata.tenant of the manifest), --server and --output.
 func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
@@ -72,7 +81,8 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 	var output string
 	group := &cobra.Command{Use: use, Short: short, Args: cobra.NoArgs}
 	pf := group.PersistentFlags()
-	if use != "admin" {
+	tenantless := adminGroups[use]
+	if !tenantless {
 		pf.StringVar(&o.Tenant, "tenant", "", "tenant ID (default $"+cli.EnvTenant+"; a manifest's metadata.tenant wins over $"+cli.EnvTenant+")")
 	}
 	pf.StringVarP(&output, "output", "o", cli.OutputTable, cli.OutputHelp)
@@ -101,7 +111,7 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 				opts.RequestTimeout = cfg.RequestTimeout
 				opts.Server = cfg.Server
 				opts.Terminal = onTerminal()
-				if use != "admin" { // Admin commands do not use a tenant.
+				if !tenantless { // Admin commands do not use a tenant.
 					opts.DefaultTenant = os.Getenv(cli.EnvTenant)
 				}
 				if opts.ID, err = cli.ResolveID(opts.ID, args); err != nil {
@@ -134,6 +144,13 @@ func newResourceCmd(use, short string, verbs []verb) *cobra.Command {
 		if v.letThrough {
 			f.StringVar(&o.Cluster, "cluster", "", "target this cluster only; its shared network keeps its own freeze state")
 			f.StringVar(&o.PauseNetwork, "network", "", "target this network and all its clusters; not with --cluster (operator commands also exclude --tenant)")
+		}
+		if v.selfAdmin {
+			f.BoolVar(&o.NoSelfAdmin, "no-self-admin", false, "do not add your IAM principal (from your AWS credentials, sts:GetCallerIdentity) to spec.access.adminPrincipals; "+
+				"the platform's role is then the only admin unless the manifest names others")
+		}
+		if v.channel {
+			f.StringVar(&o.Channel, "channel", "", "only this release channel (alpha, beta or stable): every minor its release offers")
 		}
 		if v.input {
 			f.StringVarP(&o.Input, "file", "f", "", "YAML or JSON manifest: apiVersion, kind, metadata, spec")
@@ -258,9 +275,11 @@ func newAccountCmd() *cobra.Command {
 }
 
 func newTenantCmd() *cobra.Command {
-	return newResourceCmd("tenant", "Create and list tenants, and manage their freezes (TenantService)", []verb{
+	return newResourceCmd("tenant", "Create, list and delete tenants, and manage their freezes (TenantService)", []verb{
 		{use: "create <tenant-id>", short: "Register a tenant and create its owned namespace before connecting accounts", run: cli.TenantCreate, idHelp: "tenant ID (DNS label)", args: cobra.ExactArgs(1)},
 		{use: "list", short: "List tenants visible to your identity; no --tenant required", run: cli.TenantList, args: cobra.NoArgs},
+		{use: "delete <tenant-id>", short: "Delete a tenant (refused, naming them, while it has accounts, networks, clusters, components or sub-tenants); its namespace is unregistered and kept",
+			run: cli.TenantDelete, idHelp: "tenant ID (DNS label)", args: cobra.ExactArgs(1), wait: true},
 		{use: "freeze", short: "Freeze this tenant, or one of its networks or clusters", run: cli.TenantFreeze, args: cobra.NoArgs, reason: true, until: true, wait: true, letThrough: true},
 		{use: "status", short: "Show this tenant's freeze confirmation", run: cli.TenantFreezeStatus, args: cobra.NoArgs, parent: "freeze", letThrough: true},
 		{use: "unfreeze", short: "Resume this tenant, network or cluster unless held by the platform", run: cli.TenantUnfreeze, args: cobra.NoArgs, wait: true, letThrough: true},
@@ -314,7 +333,8 @@ func newAdminReleaseCmds() []*cobra.Command {
 
 func newClusterCmd() *cobra.Command {
 	verbs := crud("cluster", cli.KindCluster, cli.ClusterCreate, cli.ClusterGet, cli.ClusterList, cli.ClusterUpdate, cli.ClusterDelete)
-	verbs[3].plan, verbs[4].force = true, true
+	verbs[0].selfAdmin, verbs[3].plan, verbs[4].force = true, true, true
+	verbs[0].short += "; adds you (the IAM principal of your AWS credentials) as an admin unless --no-self-admin"
 	verbs = append(verbs,
 		verb{use: "import", short: "Import an existing EKS cluster read-only from a ClusterImport manifest (-f)",
 			run: cli.ClusterImport, args: cobra.NoArgs, input: true, wait: true},
@@ -324,12 +344,14 @@ func newClusterCmd() *cobra.Command {
 			run: cli.ClusterDeprecations, args: cobra.ExactArgs(1), page: true, removed: true, sort: "removed-first, namespace or kind"},
 		verb{use: "recommendations <id>", short: "Recommend the requests and limits of the cluster's containers from a week of recorded usage (read-only: nothing is installed); -o table, yaml or json",
 			run: cli.ClusterRecommendations, args: cobra.ExactArgs(1), page: true, recommend: true, sort: "namespace, cpu-change or memory-change (the size of the change)"},
-		verb{use: "nodes [id]", short: "List the nodes of the cluster's node groups (all, or --group): status, instance type, zone, capacity, kubelet, NodeClaim and requested CPU, memory and pods; --manifests prints the groups' NodePool and EC2NodeClass YAML, --options what node groups may use; -o wide, yaml or json",
-			run: cli.ClusterNodes, args: cobra.MaximumNArgs(1), page: true, nodes: true, sort: "name, age, readiness, cpu-requested-percent, memory-requested-percent or pod-count"},
+		verb{use: "nodes <id>", short: "List the nodes of the cluster's node groups (all, or --group): status, instance type, zone, capacity, kubelet, NodeClaim and requested CPU, memory and pods, with a totals line per group (CPU and memory allocatable vs requested, read live); --manifests prints the groups' NodePool and EC2NodeClass YAML; -o wide, yaml or json",
+			run: cli.ClusterNodes, args: cobra.ExactArgs(1), page: true, nodes: true, sort: "name, age, readiness, cpu-requested-percent, memory-requested-percent or pod-count"},
 		verb{use: "violations <id>", short: "List the policy violations the cluster's engines report (Kyverno, Gatekeeper); --events lists the policy and admission events of the last hour instead; -o wide, yaml or json",
 			run: cli.ClusterViolations, args: cobra.ExactArgs(1), page: true, violations: true, sort: "namespace, engine or severity (violations); time or count (--events)"},
 		verb{use: "events <id>", short: "List what the controller reported about the cluster, newest first (kept for about an hour; get shows the last ten for good); -o table, yaml or json",
 			run: cli.ClusterEvents, args: cobra.ExactArgs(1), page: true, warnings: true},
+		verb{use: "versions", short: "List the Kubernetes minors clusters can run: per channel the minor its release offers, the default, the upgrade target, end of support, and the minors on extended support (on no channel, Manual clusters only); --channel shows every minor of that channel's release",
+			run: cli.ClusterVersions, args: cobra.NoArgs, channel: true},
 		verb{use: "kubeconfig <id>", short: "Add the cluster to your kubeconfig (runs aws eks update-kubeconfig with its name and region); --print or --oidc print a kubeconfig instead",
 			run: cli.ClusterKubeconfig, args: cobra.ExactArgs(1), oidc: true},
 		verb{use: "retry <id>", short: "Try again what failed on the cluster: its failed platform and tenant components and a failed automatic upgrade (or only --component, --upgrade); says per item what happens, or what to fix first",

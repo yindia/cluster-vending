@@ -135,6 +135,7 @@ func describeCluster(w io.Writer, c *cloudv1.Cluster) error {
 	}
 	kv = append(kv, kubernetesLines(st.GetKubernetes())...)
 	kv = append(kv, [][2]string{{"Endpoint", st.GetEndpoint().GetUrl()}, {"Release", releaseLine(st)}}...)
+	kv = append(kv, controlPlaneLogLines(c)...)
 	kv = append(kv, releaseLines(c)...)
 	if line := rolloutLine(st.GetRollout(), st.GetCurrentKubernetesVersion()); line != "" {
 		kv = append(kv, [2]string{"Rollout", line})
@@ -214,4 +215,17 @@ func nodeGroupSection(w io.Writer, groups []*cloudv1.NodeGroupStatus) error {
 			strconv.Itoa(int(g.GetNodes())), ready, cpu, memory, pods, orNone(oneLine(g.GetMessage()))})
 	}
 	return section(w, "Node Groups", []string{"NAME", "OWNER", "PHASE", "NODES", "READY", "CPU REQUESTED", "MEMORY REQUESTED", "PODS", "MESSAGE"}, rows)
+}
+
+// controlPlaneLogLines are cluster get's lines of the control plane's
+// CloudWatch log group and its console page; none for another cloud.
+func controlPlaneLogLines(c *cloudv1.Cluster) [][2]string {
+	if c.GetSpec().GetAws() == nil {
+		return nil
+	}
+	aws := c.GetStatus().GetAws()
+	if aws.GetControlPlaneLogGroup() == "" {
+		return [][2]string{{"Control Plane Logs", "off (spec.aws.enabledClusterLogTypes is empty)"}}
+	}
+	return [][2]string{{"Control Plane Logs", aws.GetControlPlaneLogGroup()}, {"Logs Console", aws.GetControlPlaneLogsUrl()}}
 }

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -120,19 +121,40 @@ func (s *Reconciler) codeApplied(ctx context.Context, row *model.Network, render
 	}
 	complete := failure == nil && row.AppliedGeneration >= row.Generation && maps.Equal(row.RenderHashes, rendered) &&
 		!s.deps.RenderBehind(row.RenderVersion, row.TenantID, row.ID)
+	now := time.Now()
 	if complete {
 		var err error
 		complete, err = s.codeResourcesConverged(ctx, row, rendered)
-		if err != nil {
+		switch {
+		case errors.Is(err, errCodeResourceFailed):
+			// The provider gave up on the new render: a failed attempt, so
+			// the change halts after CodeRecoveries of them.
+			failure = err
+		case err != nil:
 			// Observation failures are not failed SSA attempts. Keep the apply
-			// in flight and explain unsupported/lagging provider observations.
-			st.Message = err.Error()
-			reconcile.SetCode(ctx, st)
+			// in flight and explain unsupported/lagging provider observations,
+			// up to the convergence bound.
+			out := proto.CloneOf(st)
+			out.Message = err.Error()
+			out, note := reconcile.CodeStalled(out, err.Error(), now)
+			s.codeRecord(ctx, out, note)
 			return
 		}
 	}
-	out, note := reconcile.CodeApplied(st, complete, failure, time.Now())
-	reconcile.SetCode(ctx, out)
+	out, note := reconcile.CodeApplied(st, complete, failure, now)
+	if note == nil && failure == nil {
+		out, note = reconcile.CodeStalled(out, "its cloud resources are applied but not all Ready", now)
+	}
+	s.codeRecord(ctx, out, note)
+}
+
+// errCodeResourceFailed marks a convergence check that found a resource the
+// provider reports FAILED.
+var errCodeResourceFailed = errors.New("network code resource failed")
+
+// codeRecord leaves the pass's code change, and its note if any, in ctx.
+func (s *Reconciler) codeRecord(ctx context.Context, st *cloudv1.CodeChange, note *reconcile.Note) {
+	reconcile.SetCode(ctx, st)
 	if note != nil {
 		reconcile.AddNote(ctx, *note)
 	}
@@ -162,7 +184,7 @@ func (s *Reconciler) codeResourcesConverged(ctx context.Context, row *model.Netw
 		view := managed.View(managed.Ref{APIVersion: record.APIVersion, Kind: record.Kind, Namespace: record.Namespace, Name: record.Name}, object)
 		_, managedResource, _ := unstructured.NestedFieldNoCopy(object.Object, "spec", "forProvider")
 		if view.State == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_FAILED {
-			return false, fmt.Errorf("network code resource %s failed: %s", record.Name, view.Message)
+			return false, fmt.Errorf("%w: %s: %s", errCodeResourceFailed, record.Name, view.Message)
 		}
 		// Without a provider generation, a status write after the platform's
 		// apply is what shows the conditions observed the new render.

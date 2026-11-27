@@ -280,8 +280,8 @@ type ClusterServiceClient interface {
 	// Returns the resource totals (allocatable and requested CPU, memory and
 	// pods) per node group and for the cluster, read live from the workload
 	// cluster by the live reader (the API server never connects to it).
-	// UNIMPLEMENTED until the live reader exists. An unreadable cluster is
-	// UNAVAILABLE, with a LiveUnavailableDetail.
+	// UNIMPLEMENTED when the server runs without a live reader. An
+	// unreadable cluster is UNAVAILABLE, with a LiveUnavailableDetail.
 	GetNodeResources(context.Context, *v1.GetNodeResourcesRequest) (*v1.GetNodeResourcesResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.
@@ -399,8 +399,8 @@ type ClusterServiceHandler interface {
 	// Returns the resource totals (allocatable and requested CPU, memory and
 	// pods) per node group and for the cluster, read live from the workload
 	// cluster by the live reader (the API server never connects to it).
-	// UNIMPLEMENTED until the live reader exists. An unreadable cluster is
-	// UNAVAILABLE, with a LiveUnavailableDetail.
+	// UNIMPLEMENTED when the server runs without a live reader. An
+	// unreadable cluster is UNAVAILABLE, with a LiveUnavailableDetail.
 	GetNodeResources(context.Context, *v1.GetNodeResourcesRequest) (*v1.GetNodeResourcesResponse, error)
 	// Lists a tenant's clusters, oldest first (ids are time-ordered UUIDs),
 	// from the platform's store like GetCluster.

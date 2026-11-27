@@ -59,7 +59,8 @@ func NewPolicyReconciler(d Deps) *PolicyReconciler {
 		}}
 }
 func (r *PolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("cluster-policy").For(&cloudv1alpha1.Cluster{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).Complete(r)
+	return ctrl.NewControllerManagedBy(mgr).Named("cluster-policy").For(&cloudv1alpha1.Cluster{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		WithOptions(scanOptions(r.deps)).Complete(r)
 }
 func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	leave := r.deps.FreezeBarrier.Enter()
@@ -90,6 +91,11 @@ func (r *PolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if remaining := policy.Interval - now.Sub(last.AsTime()); remaining > 0 && remaining <= policy.Interval {
 			return ctrl.Result{RequeueAfter: remaining}, nil
 		}
+	}
+	if wait, skip := r.deps.Reachability.Skip(ctx, obj, func(ctx context.Context) ([]byte, error) {
+		return reconcile.ReadKubeconfig(ctx, r.deps.Direct, obj.Namespace, obj.Status.KubeconfigSecret)
+	}); skip {
+		return ctrl.Result{RequeueAfter: wait}, nil
 	}
 	timeout := policy.Timeout
 	if r.full {

@@ -166,6 +166,7 @@ func (s *ClusterService) GetCluster(ctx context.Context, req *cloudv1.GetCluster
 	if err != nil {
 		return nil, err
 	}
+	withControlPlaneLogs(c) // the live view too
 	return &cloudv1.GetClusterResponse{Cluster: c, AsRequested: req.GetAsRequested() && asRequested(row, c)}, nil
 }
 

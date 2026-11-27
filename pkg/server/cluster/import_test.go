@@ -295,9 +295,19 @@ func TestImportClusterPlan(t *testing.T) {
 		t.Errorf("NOT_IMPORTED = %v, want the second node group and the node role's access entry", keys(left))
 	}
 	// The takeover only adds tags to what exists, and creates what the
-	// platform adds.
+	// platform adds; the one value it changes is vpc-cni's configuration:
+	// every cluster enforces NetworkPolicy (addons.yaml), imported ones
+	// too, and the plan says so before the takeover.
+	vpcCNI := "Addon/tf:vpc-cni" + prefix + "-addon-vpc-cni"
 	for k, l := range linesBy(c, cloudv1.Disposition_DISPOSITION_WILL_UPDATE) {
-		if !strings.HasPrefix(l.GetDetail(), "adds ") || strings.Contains(l.GetDetail(), "->") {
+		detail := l.GetDetail()
+		if k == vpcCNI {
+			if !strings.Contains(detail, `configurationValues: {"env":{}} -> {"enableNetworkPolicy":"true","env":{},"nodeAgent":{"enabled":true}}`) {
+				t.Errorf("vpc-cni line %q, want network policy enforcement turned on, the cluster's env kept", detail)
+			}
+			detail = detail[strings.Index(detail, "; ")+2:]
+		}
+		if !strings.HasPrefix(detail, "adds ") || strings.Contains(detail, "->") {
 			t.Errorf("unexpected change planned for %s: %s", k, l.GetDetail())
 		}
 	}

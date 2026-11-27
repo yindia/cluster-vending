@@ -40,7 +40,7 @@ func newComponentCmd() *cobra.Command {
 		return func(cmd *cobra.Command, o *cli.Options) { cmd.Flags().StringVar(&o.Cluster, "cluster", "", usage) }
 	}
 	values := func(cmd *cobra.Command, o *cli.Options) {
-		cmd.Flags().StringVarP(&o.Input, "file", "f", "", "values file: a YAML or JSON object (component values <name> prints the one to start from)")
+		cmd.Flags().StringVarP(&o.Input, "file", "f", "", "values file: a YAML or JSON object (component template <name> prints the one to start from)")
 		cmd.Flags().BoolVar(&o.ValidateOnly, "validate-only", false, "check the request and say what would be stored; nothing changes")
 	}
 	wait := func(cmd *cobra.Command, o *cli.Options) {

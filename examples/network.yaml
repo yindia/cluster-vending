@@ -4,7 +4,7 @@
 #   cluster-vending network update --id <NETWORK_ID> -f examples/network.yaml --plan
 #   cluster-vending network update --id <NETWORK_ID> -f examples/network.yaml [--wait]
 #
-# Replace spec.bootstrapId with the BOOTSTRAP_ID that `bootstrap create -f
+# Replace spec.bootstrapId with the BOOTSTRAP_ID that `account create -f
 # examples/cloudaccount.yaml` returned. The answer has the network's id:
 # the NETWORK_ID that examples/cluster.yaml refers to.
 apiVersion: cluster-vending.io/v1

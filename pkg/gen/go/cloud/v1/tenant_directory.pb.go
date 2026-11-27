@@ -254,6 +254,95 @@ func (x *CreateTenantResponse) GetTenant() *TenantInfo {
 	return nil
 }
 
+type DeleteTenantRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteTenantRequest) Reset() {
+	*x = DeleteTenantRequest{}
+	mi := &file_cloud_v1_tenant_directory_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteTenantRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteTenantRequest) ProtoMessage() {}
+
+func (x *DeleteTenantRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_tenant_directory_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteTenantRequest.ProtoReflect.Descriptor instead.
+func (*DeleteTenantRequest) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_directory_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DeleteTenantRequest) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+type DeleteTenantResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The tenant as it was when its deletion was asked for.
+	Tenant        *TenantInfo `protobuf:"bytes,1,opt,name=tenant,proto3" json:"tenant,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteTenantResponse) Reset() {
+	*x = DeleteTenantResponse{}
+	mi := &file_cloud_v1_tenant_directory_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteTenantResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteTenantResponse) ProtoMessage() {}
+
+func (x *DeleteTenantResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_cloud_v1_tenant_directory_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteTenantResponse.ProtoReflect.Descriptor instead.
+func (*DeleteTenantResponse) Descriptor() ([]byte, []int) {
+	return file_cloud_v1_tenant_directory_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *DeleteTenantResponse) GetTenant() *TenantInfo {
+	if x != nil {
+		return x.Tenant
+	}
+	return nil
+}
+
 var File_cloud_v1_tenant_directory_proto protoreflect.FileDescriptor
 
 const file_cloud_v1_tenant_directory_proto_rawDesc = "" +
@@ -271,6 +360,10 @@ const file_cloud_v1_tenant_directory_proto_rawDesc = "" +
 	"\x13CreateTenantRequest\x12L\n" +
 	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\"D\n" +
 	"\x14CreateTenantResponse\x12,\n" +
+	"\x06tenant\x18\x01 \x01(\v2\x14.cloud.v1.TenantInfoR\x06tenant\"c\n" +
+	"\x13DeleteTenantRequest\x12L\n" +
+	"\ttenant_id\x18\x01 \x01(\tB/\xbaH,r*\x10\x01\x1882$^[a-z0-9]([a-z0-9-]{0,54}[a-z0-9])?$R\btenantId\"D\n" +
+	"\x14DeleteTenantResponse\x12,\n" +
 	"\x06tenant\x18\x01 \x01(\v2\x14.cloud.v1.TenantInfoR\x06tenantB\xa4\x01\n" +
 	"\fcom.cloud.v1B\x14TenantDirectoryProtoP\x01Z=github.com/yindia/cluster-vending/pkg/gen/go/cloud/v1;cloudv1\xa2\x02\x03CXX\xaa\x02\bCloud.V1\xca\x02\bCloud\\V1\xe2\x02\x14Cloud\\V1\\GPBMetadata\xea\x02\tCloud::V1b\x06proto3"
 
@@ -286,24 +379,27 @@ func file_cloud_v1_tenant_directory_proto_rawDescGZIP() []byte {
 	return file_cloud_v1_tenant_directory_proto_rawDescData
 }
 
-var file_cloud_v1_tenant_directory_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_cloud_v1_tenant_directory_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_cloud_v1_tenant_directory_proto_goTypes = []any{
 	(*TenantInfo)(nil),            // 0: cloud.v1.TenantInfo
 	(*ListTenantsRequest)(nil),    // 1: cloud.v1.ListTenantsRequest
 	(*ListTenantsResponse)(nil),   // 2: cloud.v1.ListTenantsResponse
 	(*CreateTenantRequest)(nil),   // 3: cloud.v1.CreateTenantRequest
 	(*CreateTenantResponse)(nil),  // 4: cloud.v1.CreateTenantResponse
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
+	(*DeleteTenantRequest)(nil),   // 5: cloud.v1.DeleteTenantRequest
+	(*DeleteTenantResponse)(nil),  // 6: cloud.v1.DeleteTenantResponse
+	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
 }
 var file_cloud_v1_tenant_directory_proto_depIdxs = []int32{
-	5, // 0: cloud.v1.TenantInfo.create_time:type_name -> google.protobuf.Timestamp
+	7, // 0: cloud.v1.TenantInfo.create_time:type_name -> google.protobuf.Timestamp
 	0, // 1: cloud.v1.ListTenantsResponse.tenants:type_name -> cloud.v1.TenantInfo
 	0, // 2: cloud.v1.CreateTenantResponse.tenant:type_name -> cloud.v1.TenantInfo
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	0, // 3: cloud.v1.DeleteTenantResponse.tenant:type_name -> cloud.v1.TenantInfo
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_cloud_v1_tenant_directory_proto_init() }
@@ -317,7 +413,7 @@ func file_cloud_v1_tenant_directory_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_cloud_v1_tenant_directory_proto_rawDesc), len(file_cloud_v1_tenant_directory_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

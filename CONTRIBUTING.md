@@ -97,6 +97,13 @@ clusters:
   forget.
 - **Catalog changes** (a definition's values, chart, `requires`) roll out to
   clusters through the channel's tiers, not at once. Test them as such.
+- **Build serial.** If you change a CRD (`config/crd/bases`), a shipped
+  definition (`pkg/catalog/definitions`) or `pkg/catalog/release.yaml`, bump
+  `Serial` in `pkg/buildserial/buildserial.go` by one and record the new
+  content digest in `pkg/buildserial/content_test.go`; never lower it or edit
+  an old entry. A build never writes over what a newer serial installed, so an
+  older build (a rollback, an old pod) cannot downgrade the schemas or revert
+  the catalog. `TestSerialCoversTheShippedContent` fails when you forget.
 - **Versions** live only in `pkg/catalog/release.yaml`. Nothing else names a
   chart or Kubernetes version.
 - **Upgrades** are automatic and gated (channels, tiers, maintenance windows,

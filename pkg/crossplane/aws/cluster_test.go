@@ -80,14 +80,15 @@ func TestClusterResources(t *testing.T) {
 // render, taken before they were added. A change here needs a
 // RenderVersion bump (render version 2 renamed the EKS cluster's Usages;
 // 3 added the helm ProviderConfig and its Usage; 4 places coredns and the
-// EBS CSI controller on the default pool, which is tainted in this plan).
+// EBS CSI controller on the default pool, which is tainted in this plan;
+// 12 turns on vpc-cni's network policy enforcement).
 func TestClusterResourcesDefaultRenderUnchanged(t *testing.T) {
 	raw, err := json.Marshal(crossplaneaws.ClusterResources(clusterPlan()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(raw)
-	if got := hex.EncodeToString(sum[:]); got != "a7becd9ee094b28ae407f5fa55d77a625e8b3e75d2e172c29fca3ebb62808867" {
+	if got := hex.EncodeToString(sum[:]); got != "191faa9d9d2ed5d192032d472bfb33be416360af3c23ce97cc52372319401b62" {
 		t.Errorf("the default render changed (sha256 %s, %d bytes)", got, len(raw))
 	}
 }

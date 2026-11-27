@@ -36,6 +36,7 @@ func (s *ClusterService) stored(ctx context.Context, row *model.Cluster) (*cloud
 	if condition, _ := platform.RowFreeze(frozen, nil); condition != nil {
 		cluster.Status.Conditions = append(cluster.Status.Conditions, condition)
 	}
+	withControlPlaneLogs(cluster)
 
 	return cluster, nil
 }

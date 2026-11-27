@@ -112,6 +112,12 @@ type Deps struct {
 	// Workers is how many accounts, networks and clusters of each kind are
 	// reconciled at once (objectOptions); 0 is one.
 	Workers int
+	// ScanWorkers is how many clusters each scanner (deprecations, policy,
+	// recommendations) reads at once (scanOptions); 0 is one.
+	ScanWorkers int
+	// Reachability keeps the scanners off unreachable clusters until a
+	// probe succeeds; nil: SetupAll makes one, shared by the scanners.
+	Reachability *ReachabilityProbes
 	// AutomaticUpgrades: the rollout controller upgrades automatic
 	// clusters; off, it plans and reports the rollout only.
 	AutomaticUpgrades bool
@@ -132,6 +138,9 @@ func (d Deps) logger() *slog.Logger {
 func SetupAll(mgr ctrl.Manager, d Deps) error {
 	if d.FreezeBarrier == nil {
 		d.FreezeBarrier = &platform.FreezeBarrier{}
+	}
+	if d.Reachability == nil {
+		d.Reachability = NewReachabilityProbes()
 	}
 	setups := []struct {
 		name  string

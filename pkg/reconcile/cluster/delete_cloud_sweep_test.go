@@ -283,6 +283,7 @@ func TestNodeStageClockSurvivesARestart(t *testing.T) {
 	clock = clock.Add(6 * time.Minute) // 16 minutes after the first failure
 	nodeStageErrors.Delete(d.row.ID)
 	require.NotContains(t, d.pass(), "stage 4 of 7", "the timeout counted from the stored start")
-	require.Nil(t, storedStatus(d.cluster(t)).GetNodeTeardown(), "the clock is cleared once the stage is over")
+	require.Equal(t, cloudv1.ClusterTeardownResult_CLUSTER_TEARDOWN_RESULT_TIMED_OUT, storedStatus(d.cluster(t)).GetNodeTeardown().GetResult(),
+		"the stage's clock records how it ended")
 	require.NotEmpty(t, eventsOf(d.cluster(t), reconcile.ReasonTeardownTimedOut))
 }

@@ -22,7 +22,11 @@
 #                         "." is the top level.
 #     defaultTolerations  the add-on's own default tolerations, written
 #                         after the pool's: EKS replaces a list whole.
-#   schema     where the placement keys were confirmed: EKS refuses a
+#   configuration  configurationValues keys the platform sets on every
+#              cluster (imported ones too), written over the tenant's: a
+#              key here wins, objects merge key by key, and every other key
+#              the tenant set stays. For platform guarantees only.
+#   schema     where the placement and configuration keys were confirmed: EKS refuses a
 #              configuration with a key its schema lacks, so no key is
 #              guessed and every placement names its source.
 #   setup      what the platform creates for an add-on that calls AWS: an
@@ -49,9 +53,19 @@
 # Changing what an entry renders (placement, setup) changes the render of
 # existing clusters: bump RenderVersion (addons_render_version_test.go).
 addons:
-  # Its policy is on the node role.
+  # Its policy is on the node role. NetworkPolicy is enforced on every
+  # cluster (the node agent runs next to aws-node): the deny-by-default
+  # policies of sub-tenant isolation (pkg/naas/assets/bootstrap.yaml) are
+  # only text without it, and a sub-tenant's access waits for it
+  # (docs/architecture.md#network-policy-enforcement).
   - name: vpc-cni
     default: true
+    configuration:
+      enableNetworkPolicy: "true"
+      nodeAgent: {enabled: true}
+    schema:
+      version: v1.23.3-eksbuild.2, and v1.16.0-eksbuild.1 (the oldest EKS lists) has both keys
+      source: describe-addon-configuration, us-west-1, 2026-11-27
 
   - name: coredns
     default: true

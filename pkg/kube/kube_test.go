@@ -151,3 +151,30 @@ func TestSchemeKnowsPlatformTypes(t *testing.T) {
 		}
 	}
 }
+
+// The management client's rate limits are settings (--kube-qps,
+// --kube-burst); unset, they are DefaultQPS and DefaultBurst.
+func TestRESTConfigRateLimits(t *testing.T) {
+	path := writeKubeconfig(t, "https://prod.example.test")
+	for _, tt := range []struct {
+		limits kube.RateLimits
+		qps    float32
+		burst  int
+	}{
+		{limits: kube.RateLimits{}, qps: kube.DefaultQPS, burst: kube.DefaultBurst},
+		{limits: kube.RateLimits{QPS: 200, Burst: 400}, qps: 200, burst: 400},
+		{limits: kube.RateLimits{QPS: 10}, qps: 10, burst: kube.DefaultBurst},
+	} {
+		cfg, err := kube.RESTConfigWith(path, "prod", tt.limits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.QPS != tt.qps || cfg.Burst != tt.burst {
+			t.Errorf("%+v: QPS %v burst %d, want %v and %d", tt.limits, cfg.QPS, cfg.Burst, tt.qps, tt.burst)
+		}
+	}
+	cfg, err := kube.RESTConfig(path, "prod")
+	if err != nil || cfg.QPS != kube.DefaultQPS || cfg.Burst != kube.DefaultBurst {
+		t.Errorf("RESTConfig: %v, QPS %v burst %d", err, cfg.QPS, cfg.Burst)
+	}
+}

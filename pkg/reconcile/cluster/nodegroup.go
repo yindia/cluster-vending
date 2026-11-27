@@ -116,7 +116,7 @@ func (s *Reconciler) currentNodeGroup(ctx context.Context, row *model.Cluster) (
 }
 
 // retireNodeGroups deletes the node groups that current superseded once
-// current is READY, and forgets them when they are gone. current is the
+// current is READY, and forgets them when they are gone (at any time). current is the
 // node group the spec renders, not the one recorded last: after a change
 // is reverted it is the older of the two.
 func (s *Reconciler) retireNodeGroups(ctx context.Context, records []model.ManagedResource, views []*cloudv1.ManagedResource, current string) error {
@@ -128,9 +128,10 @@ func (s *Reconciler) retireNodeGroups(ctx context.Context, records []model.Manag
 	for _, v := range views {
 		state[v.GetKind()+"/"+v.GetName()] = v.GetState()
 	}
-	if state[KindNodeGroup+"/"+current] != cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY {
-		return nil
-	}
+	// A superseded group that is gone is forgotten whatever current is
+	// doing (an upgrade updates it): nothing waits on it, and its record
+	// would read as a missing resource.
+	currentReady := state[KindNodeGroup+"/"+current] == cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_READY
 	for _, old := range groups {
 		if old.Name == current {
 			continue
@@ -142,6 +143,9 @@ func (s *Reconciler) retireNodeGroups(ctx context.Context, records []model.Manag
 			if err := s.deps.Store.ManagedResources().Delete(ctx, old.ID); err != nil {
 				return err
 			}
+			continue
+		}
+		if !currentReady {
 			continue
 		}
 		if err := s.deps.DeleteRecorded(ctx, []model.ManagedResource{old}); err != nil {

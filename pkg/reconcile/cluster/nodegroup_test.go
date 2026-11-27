@@ -128,6 +128,17 @@ func TestRetireNodeGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Old one gone while the replacement is being updated (an upgrade):
+	// its record is still forgotten. Nothing waits on a group that is
+	// gone, and a record left behind reads as a missing resource.
+	const updating = cloudv1.ManagedResourceState_MANAGED_RESOURCE_STATE_UPDATING
+	s, mrs, _ = ngService(t, records)
+	mrs.EXPECT().Delete(gomock.Any(), old.ID).Return(nil)
+	if err := s.retireNodeGroups(context.Background(), records, []*cloudv1.ManagedResource{
+		view(old.Name, missing), view(replacement.Name, updating)}, replacement.Name); err != nil {
+		t.Fatal(err)
+	}
+
 	// A reverted change: the older node group is the current one, and the
 	// newer one, still being created, is what goes.
 	s, _, k = ngService(t, records, liveNodeGroup(old.Name, "t3.small"), liveNodeGroup(replacement.Name, "t3.medium"))

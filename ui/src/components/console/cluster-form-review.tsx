@@ -35,7 +35,6 @@ export function ClusterReview({ form, region, networkName, accountName, tier }: 
       <MetadataListItem label="Release channel">{[automatic ? "Stable · server default" : "None · server default", "Alpha", "Beta", "Stable"][Number(form.releaseChannel)]}</MetadataListItem>
       <MetadataListItem label="Upgrade policy">{automatic ? "Automatic · no version pin" : `Manual · ${form.kubernetesVersion || "server default version"}`}</MetadataListItem>
       <MetadataListItem label="Node groups">Managed by the platform: the system node group and the Karpenter platform pool</MetadataListItem>
-      <MetadataListItem label="Namespace as a Service (NaaS)">{form.naas ? "Enabled" : "Disabled"}</MetadataListItem>
     </MetadataList>
     <Divider />
     <MetadataList columns="multi" title={<Heading level={4}>Access</Heading>}>
@@ -67,7 +66,6 @@ export function ClusterExtraReview({ form, creating = false, changed }: { form: 
   const rows: [boolean, string, ReactNode][] = [
     [!creating && shown(["displayName"]), "Display name", form.displayName || "None"],
     [!creating && shown(["releaseChannel", "upgradeMode", "kubernetesVersion"]), "Release policy", `${["None", "Alpha", "Beta", "Stable"][Number(form.releaseChannel)]} channel · ${Number(form.upgradeMode) === UpgradeMode.AUTOMATIC ? "automatic" : `manual · ${form.kubernetesVersion || "server default version"}`}`],
-    [!creating && shown(["naas"]), "Namespace as a Service (NaaS)", form.naas ? "Enabled" : "Disabled"],
     [shown(["labels"]), "Cloud tags", code(pairs(form.labels), empty)],
     [shown(["maintenanceDays", "maintenanceStart", "maintenanceDuration"]), "Maintenance window", form.maintenanceStart ? `${tokens(form.maintenanceDays).map((day) => title(Weekday[Number(day)] ?? day)).join(", ") || "Every day"} · ${form.maintenanceStart} UTC · ${form.maintenanceDuration}` : "No restriction"],
     [shown(["awsSupportType"]), "AWS support policy", enumLabel(AwsSupportTypeSchema, form.awsSupportType)],

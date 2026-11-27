@@ -280,7 +280,6 @@ test("cluster sections keep their URLs across reload, history and mobile navigat
   const section = nav.getByRole("combobox", { name: "Cluster section" });
   await expect(section).toBeInViewport();
   await section.click();
-  await expect(page.getByRole("option", { name: "Sub Tenants", exact: true })).toHaveCount(0);
   await page.getByRole("option", { name: "Overview", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Cluster summary" })).toBeInViewport();
   await expect(page).toHaveURL(/\?source=inventory$/);

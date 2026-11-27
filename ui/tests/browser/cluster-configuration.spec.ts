@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 const id = "00000000-0000-4000-8000-000000000003";
 const networkId = "00000000-0000-4000-8000-000000000002";
 const advancedSpec = {
-  region: "us-east-1", releaseChannel: 3, upgradeMode: 2, naas: true,
+  region: "us-east-1", releaseChannel: 3, upgradeMode: 2,
   network: { networkId, zoneIds: ["use1-az1", "use1-az2"], serviceCidr: "172.20.0.0/16" },
   controlPlane: { kubernetesVersion: "1.35", endpointAccess: { endpointPrivateAccess: true, endpointPublicAccess: false, publicAccessCidrs: [] }, secretsEncryption: { enabled: true, kmsKeyArn: "arn:aws:kms:us-east-1:111122223333:key/config-key" } },
   maintenanceWindow: { days: [1, 5], start: "03:30", duration: "2h" },
@@ -83,14 +83,13 @@ test("viewer can inspect full advanced desired configuration, without observed s
 });
 
 test("configuration keeps false and zero while omitting empty optional settings", async ({ page }) => {
-  const api = await mockConfiguration(page, { region: "us-east-1", naas: false, controlPlane: { endpointAccess: { endpointPublicAccess: false } }, aws: { irsa: false } });
+  const api = await mockConfiguration(page, { region: "us-east-1", controlPlane: { endpointAccess: { endpointPublicAccess: false } }, aws: { irsa: false } });
   const panel = await openConfiguration(page);
   async function value(label: string, expected: string) {
     const term = panel.locator("dt").filter({ hasText: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) });
     await expect(term).toHaveCount(1);
     await expect(term.locator("+ dd")).toHaveText(expected);
   }
-  await value("Namespace as a Service", "Disabled");
   await value("API endpoint / Endpoint public access", "Disabled");
   await value("IRSA", "Disabled");
   await expect(panel).toContainText("Any time (no maintenance window configured)");

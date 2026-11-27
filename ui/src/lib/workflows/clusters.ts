@@ -15,7 +15,6 @@ export interface ClusterForm {
   releaseChannel: string; upgradeMode: string; kubernetesVersion: string;
   publicAccess: boolean; privateAccess: boolean; publicCIDRs: string;
   adminPrincipals: string; irsa: string;
-  naas: boolean;
   labels: string;
   maintenanceDays: string; maintenanceStart: string; maintenanceDuration: string;
   zoneIds: string; serviceCidr: string; encryptionEnabled: string; encryptionKeyArn: string;
@@ -30,7 +29,7 @@ export interface ClusterForm {
 export const emptyClusterForm: ClusterForm = {
   name: "", displayName: "", networkId: "", releaseChannel: "0", upgradeMode: "1",
   kubernetesVersion: "", publicAccess: true, privateAccess: true, publicCIDRs: "",
-  adminPrincipals: "", irsa: "default", naas: false,
+  adminPrincipals: "", irsa: "default",
   labels: "{}",
   maintenanceDays: "", maintenanceStart: "", maintenanceDuration: "", zoneIds: "", serviceCidr: "",
   encryptionEnabled: "", encryptionKeyArn: "", oidcYaml: "", accessEntriesYaml: "",
@@ -60,7 +59,6 @@ export function clusterForm(cluster: Cluster, resolved?: Cluster): ClusterForm {
     publicCIDRs: endpoint?.publicAccessCidrs.join(", ") ?? "",
     adminPrincipals: spec?.access?.adminPrincipals.join(", ") ?? "",
     irsa: aws?.irsa === undefined ? "default" : String(aws.irsa),
-    naas: spec?.naas ?? false,
     labels: JSON.stringify(cluster.labels),
     maintenanceDays: window?.days.join(", ") ?? "", maintenanceStart: window?.start ?? "", maintenanceDuration: window?.duration ?? "",
     zoneIds: zones.join(", "), serviceCidr: spec?.network?.serviceCidr || actual?.network?.serviceCidr || "",
@@ -89,7 +87,6 @@ const mutable = {
   publicCIDRs: "spec.control_plane.endpoint_access.public_access_cidrs",
   adminPrincipals: "spec.access.admin_principals",
   irsa: "spec.aws.irsa",
-  naas: "spec.naas",
   labels: "labels",
   maintenanceDays: "spec.maintenance_window", maintenanceStart: "spec.maintenance_window", maintenanceDuration: "spec.maintenance_window",
   encryptionEnabled: "spec.control_plane.secrets_encryption", encryptionKeyArn: "spec.control_plane.secrets_encryption",
@@ -107,7 +104,7 @@ const inputFields = Object.keys(allPaths) as ClusterInputField[];
 export const clusterWizardSteps = ["Cluster settings", "Access", "Add-ons and logging", "Review"] as const;
 export const clusterReviewStep = clusterWizardSteps.length - 1;
 const stepFields: readonly (readonly ClusterInputField[])[] = [
-  ["displayName", "labels", "releaseChannel", "upgradeMode", "kubernetesVersion", "awsSupportType", "naas", "maintenanceDays", "maintenanceStart", "maintenanceDuration"],
+  ["displayName", "labels", "releaseChannel", "upgradeMode", "kubernetesVersion", "awsSupportType", "maintenanceDays", "maintenanceStart", "maintenanceDuration"],
   ["publicAccess", "privateAccess", "publicCIDRs", "adminPrincipals", "irsa", "zoneIds", "serviceCidr", "encryptionEnabled", "encryptionKeyArn", "oidcYaml", "accessEntriesYaml", "awsAdditionalSecurityGroups", "awsAuthenticationMode"],
   ["addonsYaml", "awsLogGroupEnabled", "awsLogRetentionDays", "awsLogTypes"],
 ];

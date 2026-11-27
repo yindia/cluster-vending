@@ -71,7 +71,6 @@ export interface ClusterFieldsProps {
   onChange: Change;
   disabled: boolean;
   creating?: boolean;
-  naasLockReason?: string;
   rows: RowState;
   /** Editing: the stored cluster (as requested) and the cluster as it runs. */
   baseline?: Cluster;
@@ -108,7 +107,7 @@ function useInputs({ value, onChange, disabled, creating }: ClusterFieldsProps) 
 }
 
 function SettingsStep(props: ClusterFieldsProps) {
-  const { value, onChange, disabled, creating, networkPicker, networkName, region, tier, naasLockReason, rows, current } = props;
+  const { value, onChange, disabled, creating, networkPicker, networkName, region, tier, rows, current } = props;
   const { text, choice } = useInputs(props);
   const automatic = Number(value.upgradeMode) === UpgradeMode.AUTOMATIC;
   const running = current?.status?.currentKubernetesVersion || current?.spec?.controlPlane?.kubernetesVersion;
@@ -142,9 +141,6 @@ function SettingsStep(props: ClusterFieldsProps) {
       {extendedIssue && <Banner status="warning" title="Extended-support version" description={extendedIssue} />}
     </Section>
     <Section title="Node groups" description={platformNodeGroupsNote} />
-    <Section title="Namespace as a Service">
-      <CheckboxInput label="Namespace as a Service (NaaS)" htmlName="naas" value={value.naas} isDisabled={disabled || !!naasLockReason} onChange={(next) => onChange("naas", next)} description={naasLockReason || "Enable support for team namespaces with separate access, quotas, and policies."} />
-    </Section>
     <Section title="Cloud tags" description="Tags apply to the cluster and its managed resources.">
       <FormEntryRows label="Cloud tags" rowLabel="cloud tag" rows={rows.rows} disabled={disabled} limit={40} hint="Up to 40 AWS tags; the aws: prefix is reserved."
         issues={new Map([...keyIssues(rows.rows)].filter(([id]) => rows.invalidIds.has(id)))}

@@ -15,7 +15,7 @@ type ConfigurationGroup = { key: string; title: string; rows: ConfigurationRow[]
 const titles: Record<string, string> = {
   network: "Network", controlPlane: "Control plane",
   access: "Access", maintenanceWindow: "Maintenance window",
-  naas: "Namespace as a Service", endpointAccess: "API endpoint",
+  endpointAccess: "API endpoint",
 };
 const acronyms: Record<string, string> = { aws: "AWS", api: "API", oidc: "OIDC", cidr: "CIDR", cidrs: "CIDRs", id: "ID", ids: "IDs", arn: "ARN", arns: "ARNs", url: "URL", irsa: "IRSA", ami: "AMI", cpu: "CPU", gb: "GB", kms: "KMS", ssh: "SSH" };
 function label(name: string): string {

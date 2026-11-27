@@ -47,9 +47,6 @@ export function EditCluster({ clusterId, current, network, initialStep = 0, onCl
 
 function ClusterEditor({ baseline, current, network, asRequested, initialStep, onApplied, onClose, onReload }: { baseline: Cluster; current: Cluster; network?: Network; asRequested: boolean; initialStep: number; onApplied: () => void; onClose: () => void; onReload: () => void }) {
   const { api, tenantId } = usePlatform();
-  const loadSubTenants = useCallback(async (signal: AbortSignal) => baseline.spec?.naas ? api.subtenant.listSubTenants({ tenantId, clusterId: baseline.id, pageSize: 1 }, { signal }) : undefined, [api, tenantId, baseline.id, baseline.spec?.naas]);
-  const allocations = useAsyncQuery(loadSubTenants);
-  const naasLockReason = !baseline.spec?.naas ? undefined : allocations.loading ? "Checking existing Sub Tenants before allowing NaaS to be disabled…" : allocations.error ? "Sub Tenants could not be checked. Reload before disabling NaaS." : allocations.data?.subtenants.length || allocations.data?.nextPageToken ? "Delete all Sub Tenants, including those still deleting, before disabling NaaS." : undefined;
   // The form as it opened is the diff baseline: the update mask is exactly what differs from it.
   const [opened] = useState(() => clusterForm(baseline, current));
   const [form, setForm] = useState(opened);
@@ -76,7 +73,6 @@ function ClusterEditor({ baseline, current, network, asRequested, initialStep, o
   });
   function change<K extends keyof ClusterForm>(field: K, value: ClusterForm[K]) {
     if (lockedFields.includes(field)) return;
-    if (field === "naas" && value === false && naasLockReason) return;
     invalidate();
     setForm((old) => ({ ...old, [field]: value }));
   }
@@ -97,7 +93,6 @@ function ClusterEditor({ baseline, current, network, asRequested, initialStep, o
     const inputRevision = inputs.current;
     try {
       if (stale) throw new Error("The cluster changed. Reload editable cluster and review a new plan.");
-      if (baseline.spec?.naas && !draft.naas && naasLockReason) throw new Error(naasLockReason);
       const request = buildClusterUpdate(tenantId, baseline, draft, opened);
       if (apply) {
         if (!review) throw new Error("Review a plan first.");
@@ -132,13 +127,12 @@ function ClusterEditor({ baseline, current, network, asRequested, initialStep, o
     <form id={formId} method="post" aria-label="Cluster update settings" noValidate onSubmit={(event) => { event.preventDefault(); void submit(reviewing); }}>
       <VStack gap={6}>
         {!reviewing && yaml.mode === "yaml" && <ClusterYamlPanel value={yaml.text} onChange={yaml.edit} error={yaml.error} disabled={busy} editing />}
-        {!reviewing && yaml.mode === "guided" && <ClusterFields key={revision} step={step} value={form} onChange={change} rows={rows} baseline={baseline} current={current} naasLockReason={naasLockReason} disabled={busy}
+        {!reviewing && yaml.mode === "guided" && <ClusterFields key={revision} step={step} value={form} onChange={change} rows={rows} baseline={baseline} current={current} disabled={busy}
           networkName={network?.displayName || network?.name} region={baseline.spec?.region ?? ""} tier={network?.spec?.tier || baseline.status?.tier} />}
         {!reviewing && <Text type="supporting" data-pending-changes="">{changed.size ? `Changed: ${[...changed].map(clusterFieldLabel).join(", ")}.` : "No changes yet."}</Text>}
         {reviewing && review && <VStack gap={4}>
           <PlanReview plan={review.plan} />
           <ClusterExtraReview form={form} changed={changed} />
-          {changed.has("naas") && <Banner status={form.naas ? "info" : "warning"} title={form.naas ? "Enable Namespace as a Service" : "Disable Namespace as a Service"} description={form.naas ? "Enable support for team namespaces with separate access, quotas, and policies. Setup continues after you apply this change." : "Turn off namespace tenancy controls for this cluster. Existing namespaces, workloads, and data will remain. Review the impact on teams using these controls before applying."} />}
           <MetadataList>
             <MetadataListItem label="Update mask">{review.request.updateMask?.paths.join(", ")}</MetadataListItem>
             <MetadataListItem label="Concurrency token">{baseline.etag}</MetadataListItem>

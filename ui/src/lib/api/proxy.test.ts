@@ -10,23 +10,6 @@ function request(options: { origin?: string; body?: string; headers?: Record<str
   });
 }
 
-test("bridge allowlists generated SubTenant CRUD methods", async () => {
-  for (const method of ["CreateSubTenant", "GetSubTenant", "ListSubTenants", "UpdateSubTenant", "DeleteSubTenant"]) {
-    let called = false;
-    const response = await proxyRPC(request({ body: '{"tenantId":"acme"}' }), "cloud.v1.SubTenantService", method, {
-      baseUrl: "https://platform.example.test",
-      fetch: (async (url, init) => {
-        called = true;
-        assert.equal(String(url), `https://platform.example.test/cloud.v1.SubTenantService/${method}`);
-        assert.equal(new TextDecoder().decode(init?.body as Uint8Array), '{"tenantId":"acme"}');
-        return Response.json({});
-      }) as typeof fetch,
-    });
-    assert.equal(response.status, 200);
-    assert.equal(called, true);
-  }
-});
-
 test("Connect bridge forwards only caller authorization to a fixed allowlisted RPC", async () => {
   let called = 0;
   const fetcher: typeof fetch = async (url, init) => {

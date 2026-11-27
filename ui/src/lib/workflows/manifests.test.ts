@@ -57,17 +57,6 @@ test("unsafe, ambiguous and oversized YAML fail before review", () => {
   }
 });
 
-test("cluster YAML accepts generated NaaS booleans and preserves their reviewed value", () => {
-  for (const naas of [false, true]) {
-    const spec = { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } }, aws: {}, naas };
-    const review = parseManifest(stringify(envelope("Cluster", spec)), "Cluster", "acme", id);
-    const request = fromJsonString(CreateClusterRequestSchema, review.requestJson);
-    assert.equal(request.cluster?.spec?.naas, naas);
-    assert.equal(request.requestId, id);
-  }
-  const template = manifestTemplate("Cluster", "acme").replace("REPLACE_WITH_NETWORK_UUID", id);
-  assert.equal(fromJsonString(CreateClusterRequestSchema, parseManifest(template, "Cluster", "acme", id).requestJson).cluster?.spec?.naas ?? false, false);
-});
 test("a Cluster manifest cannot define node groups: the platform creates them", () => {
   const spec = { region: "us-west-1", network: { networkId: id }, controlPlane: { endpointAccess: { endpointPublicAccess: false, endpointPrivateAccess: true } } };
   for (const extra of [{ defaultNodePool: { instanceTypes: ["m6i.large"] } }, { nodeGroups: [{ name: "batch" }] }]) {

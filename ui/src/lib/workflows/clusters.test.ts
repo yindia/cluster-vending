@@ -75,8 +75,8 @@ test("switching to automatic mode never converts a resolved or previously edited
 });
 
 test("manual version is masked only after explicit editing; unedited resolved version stays absent", () => {
-  const request = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), naas: true });
-  assert.deepEqual(request.updateMask?.paths, ["spec.naas"]);
+  const request = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), displayName: "Renamed" });
+  assert.deepEqual(request.updateMask?.paths, ["display_name"]);
   assert.equal(request.cluster?.spec?.controlPlane, undefined);
   const pin = buildClusterUpdate("tenant-a", resolved, { ...clusterForm(resolved), kubernetesVersion: "1.34" });
   assert.deepEqual(pin.updateMask?.paths, ["spec.control_plane.kubernetes_version"]);
@@ -111,45 +111,6 @@ test("validate only touched inputs on updates, and validate endpoint dependencie
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "" }), /requires at least one/);
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicAccess: false, privateAccess: false }), /at least one API endpoint/);
   assert.throws(() => buildClusterUpdate("tenant-a", resolved, { ...form, publicCIDRs: "999.1.1.1/33" }), /IPv4 CIDRs/);
-});
-
-test("NaaS defaults off, hydrates saved values and is included in guided creation", () => {
-  assert.equal(emptyClusterForm.naas, false);
-  assert.equal(clusterForm(resolved).naas, false);
-  const enabled = clone(ClusterSchema, resolved);
-  enabled.spec!.naas = true;
-  assert.equal(clusterForm(enabled).naas, true);
-  const draft = { ...emptyClusterForm, name: "new-cluster", networkId: network.id, publicCIDRs: "203.0.113.0/24" };
-  for (const naas of [false, true]) {
-    const request = buildCreateCluster("tenant-a", { ...draft, naas }, network, accounts, "stable-uuid");
-    assert.equal(request.cluster?.spec?.naas, naas);
-    assert.equal(request.requestId, "stable-uuid");
-  }
-});
-
-test("NaaS updates use a sparse leaf mask and preserve disabling false through reviewed apply", () => {
-  for (const naas of [false, true]) {
-    const baseline = clone(ClusterSchema, resolved);
-    baseline.spec!.naas = !naas;
-    const form = { ...clusterForm(baseline), naas };
-    const request = buildClusterUpdate("tenant-a", baseline, form);
-    assert.deepEqual(request.updateMask?.paths, ["spec.naas"]);
-    assert.equal(request.cluster?.spec?.naas, naas);
-    assert.equal(request.cluster?.spec?.network, undefined);
-    assert.equal(request.cluster?.spec?.controlPlane, undefined);
-    assert.equal(request.cluster?.etag, baseline.etag);
-    const review = bindClusterPlan(request, create(PlanSchema, { planId: "naas-plan", applicable: true, changes: [{ action: 2 }] }));
-    const apply = applyReviewedClusterPlan(review, request);
-    assert.equal(apply.cluster?.spec?.naas, naas);
-    assert.deepEqual(apply.updateMask?.paths, ["spec.naas"]);
-    assert.equal(apply.validateOnly, false);
-    assert.equal(apply.planId, "naas-plan");
-    const changed = buildClusterUpdate("tenant-a", baseline, { ...form, displayName: "Other" });
-    assert.throws(() => applyReviewedClusterPlan(review, changed), /Inputs or etag changed/);
-    const unrelated = buildClusterUpdate("tenant-a", baseline, { ...clusterForm(baseline), displayName: "Renamed" });
-    assert.deepEqual(unrelated.updateMask?.paths, ["display_name"]);
-    assert.equal(unrelated.cluster?.spec, undefined);
-  }
 });
 
 test("applying uses exact reviewed payload, tenant, mask and etag with explicit plan ID", () => {
@@ -446,9 +407,9 @@ test("the update mask is the diff against the form as it opened: reformatting an
   assert.deepEqual([...changedClusterFields(baseline, { ...baseline, publicCIDRs: " 203.0.113.0/24 ", labels: '{ "team": "payments" }' })], []);
   assert.deepEqual([...changedClusterFields(baseline, { ...baseline, displayName: "Payments" })], ["displayName"]);
   assert.deepEqual([...changedClusterFields(baseline, { ...baseline, displayName: "" })], [], "an edit back to the opened value is no change");
-  const edited = { ...baseline, naas: true, maintenanceStart: "02:00", maintenanceDuration: "4h" };
+  const edited = { ...baseline, displayName: "Payments", maintenanceStart: "02:00", maintenanceDuration: "4h" };
   const request = buildClusterUpdate("tenant-a", requested, edited, baseline);
-  assert.deepEqual(request.updateMask?.paths, ["spec.maintenance_window", "spec.naas"]);
+  assert.deepEqual(request.updateMask?.paths, ["display_name", "spec.maintenance_window"]);
   assert.throws(() => buildClusterUpdate("tenant-a", requested, { ...baseline, serviceCidr: "172.21.0.0/16" }, baseline), /immutable/);
 });
 

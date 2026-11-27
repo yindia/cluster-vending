@@ -831,7 +831,7 @@ export const TenantService: GenService<{
   /**
    * Deletes a tenant's registration. Refused with FAILED_PRECONDITION,
    * naming what remains, while the tenant has cloud accounts, networks,
-   * clusters, components or sub-tenants: delete those first. Otherwise
+   * clusters or components: delete those first. Otherwise
    * the Tenant CR is deleted; its finalizer (the tenant controller)
    * unregisters the namespace tenant-<tenant_id> without deleting it or
    * its contents, so a later CreateTenant of the same ID can take it back.

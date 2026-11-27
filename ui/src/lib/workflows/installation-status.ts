@@ -16,12 +16,7 @@ export function componentInstallationStatus(component: Component): InstallationS
   return componentPhaseStatus(phase);
 }
 
-export function platformInstallationStatus(component: PlatformComponent, selected = true): InstallationStatus {
-  if (component.phase === ComponentPhase.FAILED) return componentPhaseStatus(component.phase);
-  if (!selected) {
-    const removing = !!component.installedVersion || component.phase === ComponentPhase.READY || component.phase === ComponentPhase.DELETING;
-    return { label: removing ? "Disabling" : "Disabled", tone: removing ? "warning" : "neutral", key: removing ? "disabling" : "disabled" };
-  }
+export function platformInstallationStatus(component: PlatformComponent): InstallationStatus {
   return componentPhaseStatus(component.phase);
 }
 

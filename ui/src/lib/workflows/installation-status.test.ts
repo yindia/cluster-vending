@@ -19,15 +19,15 @@ test("disabled tenant catalog entries never inherit a stale Ready phase", () => 
   assert.equal(componentInstallationStatus(item).label, "Deleting");
 });
 
-test("platform components need no tenant ID and removal stays visible", () => {
+test("platform components need no tenant ID and report their observed phase", () => {
   const item = create(ComponentSchema, { management: ComponentManagement.PLATFORM, status: { phase: ComponentPhase.READY } });
   assert.equal(componentInstallationStatus(item).label, "Ready");
-  const platform = create(PlatformComponentSchema, { name: "capsule", phase: ComponentPhase.PENDING });
-  assert.equal(platformInstallationStatus(platform, false).label, "Disabled");
+  const platform = create(PlatformComponentSchema, { name: "cert-manager", phase: ComponentPhase.PENDING });
+  assert.equal(platformInstallationStatus(platform).label, "Pending");
   platform.phase = ComponentPhase.READY;
-  assert.equal(platformInstallationStatus(platform, false).label, "Disabling");
+  assert.equal(platformInstallationStatus(platform).tone, "success");
   platform.phase = ComponentPhase.FAILED;
-  assert.equal(platformInstallationStatus(platform, false).label, "Failed");
+  assert.equal(platformInstallationStatus(platform).label, "Failed");
 });
 
 test("optional EKS add-ons are Disabled only when selection and observations confirm absence", () => {

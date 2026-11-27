@@ -28,7 +28,6 @@ import { OverviewPage } from "./overview-page";
 import { AccountsPage } from "./accounts-page";
 import { NetworksPage } from "./networks-page";
 import { NodeGroupDetail } from "./cluster-node-group-detail";
-import { SubTenantDetail } from "./subtenant-detail";
 import { ClustersPage } from "./clusters-page";
 import { ReleasesPage } from "./releases-page";
 import { ComponentsPage } from "./components-page";
@@ -55,26 +54,26 @@ function SessionGate({ children, onConfigure }: { children: ReactNode; onConfigu
   return children;
 }
 
-function SectionPage({ section, resourceId, subtenantId, nodeGroup, channelId, componentClusterId, freezeSelection }: { section: Section; resourceId?: string; subtenantId?: string; nodeGroup?: string; channelId?: "alpha" | "beta" | "stable"; componentClusterId?: string; freezeSelection?: FreezeSelection }) {
+function SectionPage({ section, resourceId, nodeGroup, channelId, componentClusterId, freezeSelection }: { section: Section; resourceId?: string; nodeGroup?: string; channelId?: "alpha" | "beta" | "stable"; componentClusterId?: string; freezeSelection?: FreezeSelection }) {
   const { tenantId } = usePlatform();
   if (!tenantId) return <ConnectionPanel />;
   switch (section) {
     case "overview": return <OverviewPage />;
     case "accounts": return <AccountsPage resourceId={resourceId} />;
     case "networks": return <NetworksPage resourceId={resourceId} />;
-    case "clusters": return resourceId && nodeGroup ? <NodeGroupDetail key={nodeGroup} clusterId={resourceId} group={nodeGroup} /> : resourceId && subtenantId ? <SubTenantDetail key={subtenantId} clusterId={resourceId} subtenantId={subtenantId} /> : <ClustersPage resourceId={resourceId} />;
+    case "clusters": return resourceId && nodeGroup ? <NodeGroupDetail key={nodeGroup} clusterId={resourceId} group={nodeGroup} /> : <ClustersPage resourceId={resourceId} />;
     case "components": return <ComponentsPage resourceId={resourceId} clusterId={componentClusterId} />;
     case "releases": return <ReleasesPage resourceId={resourceId} channelId={channelId} />;
     case "freeze": return <FreezePage initialSelection={freezeSelection} />;
   }
 }
 
-export default function ConsoleApp({ section = "overview", resourceId, subtenantId, nodeGroup, channelId, componentClusterId, freezeSelection }: { section?: Section; resourceId?: string; subtenantId?: string; nodeGroup?: string; channelId?: "alpha" | "beta" | "stable"; componentClusterId?: string; freezeSelection?: FreezeSelection }) {
+export default function ConsoleApp({ section = "overview", resourceId, nodeGroup, channelId, componentClusterId, freezeSelection }: { section?: Section; resourceId?: string; nodeGroup?: string; channelId?: "alpha" | "beta" | "stable"; componentClusterId?: string; freezeSelection?: FreezeSelection }) {
   const { mode, setMode } = useAppearance();
   const browserAuth = useBrowserAuth();
   const { scopeKey, identity, liveUpdates, setLiveUpdates, connect } = usePlatform();
   const router = useRouter();
-  const routeContext = JSON.stringify([section, resourceId, subtenantId, nodeGroup, channelId, componentClusterId, freezeSelection?.scope, freezeSelection?.id]);
+  const routeContext = JSON.stringify([section, resourceId, nodeGroup, channelId, componentClusterId, freezeSelection?.scope, freezeSelection?.id]);
   const [leavingResource, setLeavingResource] = useState<string>();
   // Clear the guard as soon as new route props arrive, including when React reuses this instance.
   if (leavingResource !== undefined && leavingResource !== routeContext) setLeavingResource(undefined);
@@ -98,12 +97,12 @@ export default function ConsoleApp({ section = "overview", resourceId, subtenant
       <Link href="/">Workspace</Link><Text color="secondary" aria-hidden="true">/</Text>
       {resourceId || channelId ? <>
         <Link href={`/${section}`}>{current.label}</Link>
-        {(subtenantId || nodeGroup) && resourceId && <>
+        {nodeGroup && resourceId && <>
           <Text color="secondary" aria-hidden="true">/</Text>
-          <Link href={`/clusters/${encodeURIComponent(resourceId)}?tab=${nodeGroup ? "node-groups" : "subtenants"}`}>{nodeGroup ? "Node groups" : "Sub Tenants"}</Link>
+          <Link href={`/clusters/${encodeURIComponent(resourceId)}?tab=node-groups`}>Node groups</Link>
         </>}
         <Text color="secondary" aria-hidden="true">/</Text>
-        <Text color="secondary" aria-current="page">{nodeGroup ? "Node group" : subtenantId ? "Sub Tenant" : channelId ? "Channel" : "Details"}</Text>
+        <Text color="secondary" aria-current="page">{nodeGroup ? "Node group" : channelId ? "Channel" : "Details"}</Text>
       </> : <Text color="secondary" aria-current="page">{current.label}</Text>}
     </HStack>
     <Dialog isOpen={connectionOpen} onOpenChange={setConnectionOpen} purpose="form" width="min(40rem, calc(100vw - 2rem))" maxHeight="90dvh" padding={0}>
@@ -128,6 +127,6 @@ export default function ConsoleApp({ section = "overview", resourceId, subtenant
         footer={<LayoutFooter padding={6} hasDivider><HStack gap={2} hAlign="end" wrap="wrap"><Button label="Close" onClick={() => setConnectionOpen(false)} />{!browserAuth.enabled && <Button label="Connect" variant="primary" type="submit" form={`${settingsId}-form`} />}</HStack></LayoutFooter>}
       />
     </Dialog>
-    {leavingResource === routeContext && hasResourceContext ? <Text role="status">Switching tenant and opening Overview…</Text> : <SessionGate key={scopeKey} onConfigure={() => setConnectionOpen(true)}><SectionPage key={`${section}:${channelId ?? resourceId ?? "list"}:${nodeGroup ?? ""}:${componentClusterId ?? ""}:${freezeSelection?.scope ?? ""}:${freezeSelection?.id ?? ""}`} section={section} resourceId={resourceId} subtenantId={subtenantId} nodeGroup={nodeGroup} channelId={channelId} componentClusterId={componentClusterId} freezeSelection={freezeSelection} /></SessionGate>}
+    {leavingResource === routeContext && hasResourceContext ? <Text role="status">Switching tenant and opening Overview…</Text> : <SessionGate key={scopeKey} onConfigure={() => setConnectionOpen(true)}><SectionPage key={`${section}:${channelId ?? resourceId ?? "list"}:${nodeGroup ?? ""}:${componentClusterId ?? ""}:${freezeSelection?.scope ?? ""}:${freezeSelection?.id ?? ""}`} section={section} resourceId={resourceId} nodeGroup={nodeGroup} channelId={channelId} componentClusterId={componentClusterId} freezeSelection={freezeSelection} /></SessionGate>}
   </VStack></LayoutContent>} /></AppShell>;
 }

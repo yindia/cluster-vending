@@ -19,7 +19,6 @@ import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector } from "@astryxdesign/core/Selector";
 import { ConsoleTable as Table } from "./console-table";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
-import { ClusterSubTenants } from "./cluster-subtenants";
 import { clusterSections } from "./cluster-sections";
 import { DetailNavigation, useDetailSection } from "./detail-navigation";
 import { ComponentPhase } from "@/gen/cloud/v1/component_pb";
@@ -290,8 +289,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
   }, [api, tenantId, clusterId]);
   const detail = useAsyncQuery(load, { pollMs: polling ? 5000 : undefined });
   const cluster = detail.data?.cluster;
-  const sections = clusterSections(!!cluster?.spec?.naas);
-  const pages = sections.flatMap(section => section.pages);
+  const pages = clusterSections.flatMap(section => section.pages);
   const navigation = useDetailSection(pages);
   const { active: activeTab, href: tabHref, open: openTab, panelId } = navigation;
   const activityOpen = activeTab === "activity" && !!cluster;
@@ -353,7 +351,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         </HStack>}
       />
       {message && <VStack role="status"><Banner status="info" title="Request recorded" description={message} /></VStack>}
-      <DetailNavigation resource="Cluster" pages={pages} groups={sections} selection={navigation} />
+      <DetailNavigation resource="Cluster" pages={pages} groups={clusterSections} selection={navigation} />
       {activeTab === "overview" && <VStack id={panelId("overview")} role="tabpanel" aria-label="Overview" tabIndex={0} gap={6}>
         <HStack hAlign="between" vAlign="center"><Heading level={2}>Cluster summary</Heading><RefreshButton label="Refresh overview" onClick={() => { refresh(); network.refresh(); }} isLoading={detail.refreshing || network.refreshing} /></HStack>
         {pause && pause.key !== "not-paused" && <Banner status={pause.tone === "warning" ? "warning" : "info"} title={pause.label} description={pause.detail} />}
@@ -375,7 +373,6 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
               <MetadataListItem label="Generation">{String(status?.observedGeneration ?? 0)} observed / {String(cluster.generation)} desired</MetadataListItem>
               {(aws || desiredAws) && <MetadataListItem label="Control plane logs"><ControlPlaneLogs logs={controlPlaneLogs(aws)} /></MetadataListItem>}
               <MetadataListItem label="Platform release">{status?.platformRelease ? <Link href={`/releases/${encodeURIComponent(status.platformRelease)}`}>{status.platformRelease}</Link> : "Not reported"}</MetadataListItem>
-              <MetadataListItem label="Namespace as a Service (NaaS)"><VStack gap={1}><Text>{cluster.spec?.naas ? "Enabled" : "Disabled"}</Text>{cluster.spec?.naas && <Link href={tabHref("subtenants")}>View Sub Tenants</Link>}</VStack></MetadataListItem>
             </MetadataList>
             <ErrorNotice message={network.error} />
           </VStack>
@@ -479,7 +476,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
           <VStack gap={3}>
             <HStack gap={3} wrap="wrap" hAlign="between" vAlign="center"><Heading level={3}>Platform components</Heading>{status?.platformRelease && <Link href={`/releases/${encodeURIComponent(status.platformRelease)}`}>Release {status.platformRelease}</Link>}</HStack>
             <Text type="supporting">The platform release pins chart versions. Installed versions show the last observed ready version and can lag during rollout.</Text>
-            <PlatformComponentInventory components={status?.platformComponents ?? []} naasEnabled={cluster.spec?.naas ?? false} />
+            <PlatformComponentInventory components={status?.platformComponents ?? []} />
           </VStack>
         </ClusterComponentsPanel>
       </VStack>}
@@ -487,7 +484,6 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         <ClusterViolationsPanel clusterId={clusterId} />
       </VStack>}
       {activeTab === "deprecations" && <VStack id={panelId("deprecations")} role="tabpanel" aria-label="Deprecated APIs" tabIndex={0} gap={6}><ClusterDeprecationsPanel clusterId={clusterId} /></VStack>}
-      {activeTab === "subtenants" && cluster.spec?.naas && <VStack id={panelId("subtenants")} role="tabpanel" aria-label="Sub Tenants" tabIndex={0} gap={6}><ClusterSubTenants clusterId={clusterId} /></VStack>}
       {activeTab === "recommendations" && <VStack id={panelId("recommendations")} role="tabpanel" aria-label="Recommendations" tabIndex={0} gap={6}><ClusterRecommendationsPanel clusterId={clusterId} /></VStack>}
       {editing !== false && <EditCluster network={network.data?.network} clusterId={clusterId} current={cluster} initialStep={editing} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
       {deleting && <DeleteCluster cluster={cluster} onCancel={() => setDeleting(false)} onDeleted={() => { setDeleting(false); setMessage("Deletion requested. Resources are removed asynchronously."); refresh(); }} />}
@@ -508,12 +504,12 @@ function CopyReference({ value, href, display, label: copyLabel }: { value: stri
   return <HStack gap={2} wrap="wrap" vAlign="center"><Link href={href}>{display || value}</Link><CopyButton value={value} label={copyLabel} /></HStack>;
 }
 
-function PlatformComponentInventory({ components, naasEnabled }: { components: PlatformComponent[]; naasEnabled: boolean }) {
+function PlatformComponentInventory({ components }: { components: PlatformComponent[] }) {
   const columns: TableColumn<PlatformComponent>[] = [
     { key: "name", header: "Component", width: proportional(2, { minWidth: 80 }) },
     { key: "version", header: "Release-pinned version", width: proportional(1, { minWidth: 80 }), renderCell: (component) => <Text>{component.version || "No release pin reported"}</Text> },
     { key: "installedVersion", header: "Installed version", width: proportional(1, { minWidth: 80 }), renderCell: (component) => <Text>{component.installedVersion || "Not observed"}</Text> },
-    { key: "phase", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: (component) => { const state = platformInstallationStatus(component, component.name !== "capsule" || naasEnabled); return <StatusValue label={state.label} tone={state.tone} />; } },
+    { key: "phase", header: "State", width: proportional(1, { minWidth: 80 }), renderCell: (component) => { const state = platformInstallationStatus(component); return <StatusValue label={state.label} tone={state.tone} />; } },
     { key: "message", header: "Details", width: proportional(2, { minWidth: 80 }), renderCell: (component) => <VStack gap={1}><Text type="supporting">{component.message || component.helmState || "No message reported"}</Text>{component.lastError && <Text type="supporting">{component.lastError}</Text>}</VStack> },
   ];
   return components.length ? <Table aria-label="Cluster platform component pinned and installed versions" data={components} columns={columns} idKey="name" density="compact" hasHover textOverflow="wrap" /> : <Text type="supporting">No platform components reported.</Text>;

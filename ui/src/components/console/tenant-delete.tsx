@@ -48,7 +48,7 @@ export function DeleteTenantDialog({ tenantId, onClose, onDeleted }: { tenantId:
       <form id={formId} method="post" onSubmit={submit} aria-label="Delete tenant" noValidate>
         <VStack gap={4}>
           {failure && <VStack role="alert"><Banner status={failure.status} title={failure.title} description={failure.description} /></VStack>}
-          <Text>This removes the tenant&apos;s registration. The server refuses while the tenant still has cloud accounts, networks, clusters, components or Sub Tenants: delete those first.</Text>
+          <Text>This removes the tenant&apos;s registration. The server refuses while the tenant still has cloud accounts, networks, clusters or components: delete those first.</Text>
           <Text type="supporting">The namespace tenant-{tenantId} and its contents are kept, so creating the same tenant ID again takes them back.</Text>
           <TextInput label={`Type ${tenantId} to confirm`} htmlName="confirmation" value={confirmation} onChange={(next) => { setConfirmation(next); setFailure(undefined); }} isDisabled={busy}
             autoComplete="off" autoCapitalize="none" hasAutoCorrect={false} hasSpellCheck={false} width="100%" />
@@ -80,7 +80,7 @@ export function TenantDeleteSection({ onSwitch }: { onSwitch: (tenantId: string)
     {deleted === tenantId
       ? <Text role="status">Tenant {tenantId} was deleted. Choose another tenant, or create one.</Text>
       : <>
-        <Text color="secondary">Delete tenant {tenantId} once it has no cloud accounts, networks, clusters, components or Sub Tenants.</Text>
+        <Text color="secondary">Delete tenant {tenantId} once it has no cloud accounts, networks, clusters or components.</Text>
         <HStack><Button label={`Delete tenant ${tenantId}`} variant="destructive" onClick={() => setDeleting(true)} /></HStack>
       </>}
     {deleting && <DeleteTenantDialog tenantId={tenantId} onClose={() => setDeleting(false)} onDeleted={(id) => {

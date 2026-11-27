@@ -787,7 +787,7 @@ test("a cluster that has never been scanned is not shown as compatible", async (
 test("cluster tenant catalog enables configured components only after exact reviewed confirmation", async ({ page }) => {
   const calls = await mockAPI(page, { componentCatalog: true });
   await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Services & tenancy", exact: true }).click();
+  await page.getByRole("tab", { name: "Services", exact: true }).click();
   const table = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true });
   const blocked = table.getByRole("row").filter({ has: page.getByRole("link", { name: "blocked-component", exact: true }) });
   await expect(blocked).toContainText("Disabled by platform policy");
@@ -925,7 +925,7 @@ test("channel Clusters tab lists subscriptions across all tenant pages, includin
 test("cluster component values validate before applying exact reviewed settings", async ({ page }) => {
   const calls = await mockAPI(page);
   await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Services & tenancy", exact: true }).click();
+  await page.getByRole("tab", { name: "Services", exact: true }).click();
   const row = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true }).getByRole("row").filter({ has: page.getByRole("link", { name: "external-dns", exact: true }) });
   await row.getByRole("button", { name: "Manage component", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Manage external-dns", exact: true });
@@ -1276,12 +1276,12 @@ test("disabled add-ons and catalog components never appear Ready", async ({ page
     const method = new URL(route.request().url()).pathname.split("/").at(-1);
     if (method === "GetCluster") {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ cluster: { ...cluster,
-        spec: { ...cluster.spec, naas: false, aws: { ...cluster.spec.aws, addons: [{ name: "metrics-server", version: "v1" }] } },
+        spec: { ...cluster.spec, aws: { ...cluster.spec.aws, addons: [{ name: "metrics-server", version: "v1" }] } },
         status: { ...cluster.status, aws: { addons: [
           { name: "metrics-server", version: "v1", state: "MANAGED_RESOURCE_STATE_READY" },
           { name: "aws-efs-csi-driver", version: "v1", state: "MANAGED_RESOURCE_STATE_DELETING" },
           { name: "cert-manager", version: "v1", state: "MANAGED_RESOURCE_STATE_READY" },
-        ] }, platformComponents: [{ name: "capsule", phase: "COMPONENT_PHASE_READY", installedVersion: "0.15.2" }] },
+        ] } },
       } }) }); return;
     }
     if (method === "ListComponents") {
@@ -1292,7 +1292,7 @@ test("disabled add-ons and catalog components never appear Ready", async ({ page
     await route.fallback();
   });
   await page.goto(`/clusters/${clusterId}`);
-  await page.getByRole("tab", { name: "Services & tenancy", exact: true }).click();
+  await page.getByRole("tab", { name: "Services", exact: true }).click();
   const addons = page.getByRole("table", { name: "Cluster EKS add-on target and running versions", exact: true });
   const addon = (name: string) => addons.getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
   await expect(addon("snapshot-controller")).toContainText("Disabled");
@@ -1300,7 +1300,6 @@ test("disabled add-ons and catalog components never appear Ready", async ({ page
   await expect(addon("metrics-server")).toContainText("Ready");
   await expect(addon("aws-efs-csi-driver")).toContainText("Deleting");
   await expect(addon("cert-manager")).toContainText("Disabling");
-  await expect(page.getByRole("table", { name: "Cluster platform component pinned and installed versions", exact: true })).toContainText("Disabling");
   const policies = page.getByRole("table", { name: "Cluster tenant component catalog", exact: true }).getByRole("row").filter({ has: page.getByRole("link", { name: "policies", exact: true }) });
   await expect(policies).toContainText("Disabled");
   await expect(policies.getByRole("button", { name: "Enable component", exact: true })).toBeEnabled();

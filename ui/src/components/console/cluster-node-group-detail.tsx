@@ -22,7 +22,8 @@ import {
 import type { ClusterStatus } from "@/gen/cloud/v1/cluster_pb";
 import { ConsoleTable } from "./console-table";
 import { DetailHeader, StatusValue } from "./detail-layout";
-import { NodeGroupResources } from "./node-group-resources";
+import { NodeGroupResources, NodeTotalsNote, totalsResources } from "./node-group-resources";
+import { nodeTotalsFailure, nodeTotalsOf, type NodeTotalsState } from "@/lib/workflows/node-resource-totals";
 import { NodeGroupYamlButton } from "./node-group-yaml-button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { RefreshButton } from "./refresh-button";
@@ -62,6 +63,15 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
     return (await api.cluster.listClusterNodeGroupManifests({ tenantId, clusterId }, { signal })).nodeGroups;
   }, [api, tenantId, clusterId, etag]);
   const manifests = useAsyncQuery(loadManifests);
+  const loadTotals = useCallback(async (signal: AbortSignal): Promise<NodeTotalsState> => {
+    try { return nodeTotalsOf(await api.cluster.getNodeResources({ tenantId, clusterId }, { signal }), group); }
+    catch (error) {
+      const message = nodeTotalsFailure(error);
+      if (message && !signal.aborted) return { kind: "unavailable", message };
+      throw error;
+    }
+  }, [api, tenantId, clusterId, group]);
+  const totals = useAsyncQuery(loadTotals);
 
   const [choice, setChoice] = useState<NodeStatusChoice>("all");
   const [draft, setDraft] = useState("");
@@ -103,8 +113,8 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
   const found = manifests.data?.find(item => item.name === group);
   const manifest = hasManifestYaml(found) ? found : undefined;
   const back = <Link href={`/clusters/${encodeURIComponent(clusterId)}?tab=node-groups`}>Cluster node groups</Link>;
-  const refresh = () => { cluster.refresh(); manifests.refresh(); nodes.refresh(); };
-  const refreshing = cluster.refreshing || manifests.refreshing || nodes.refreshing;
+  const refresh = () => { cluster.refresh(); manifests.refresh(); nodes.refresh(); totals.refresh(); };
+  const refreshing = cluster.refreshing || manifests.refreshing || nodes.refreshing || totals.refreshing;
 
   if (cluster.error) return <VStack gap={3}>{back}<Banner status="error" title="Node group unavailable" description={cluster.error} /><RefreshButton label="Refresh node group" onClick={refresh} isLoading={refreshing} /></VStack>;
   if (!cluster.data) return <Text role="status">Loading node group…</Text>;
@@ -120,7 +130,8 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
   const count = nodeCount(loaded ? total : undefined, !!state?.collected, filtered, detail.observed ? detail.nodes : undefined);
   // The whole group is on screen when the list is unfiltered, complete and one page: its nodes are summed live.
   const wholeGroup = loaded && !filtered && pager.page === 1 && !loaded.response.nextPageToken && loaded.response.complete ? loaded.response.nodes : undefined;
-  const resources = groupResources(detail.observed, wholeGroup);
+  const live = totals.data?.kind === "ready" ? totals.data : undefined;
+  const resources = live ? totalsResources(live.totals) : groupResources(detail.observed, wholeGroup);
   const clusterName = cluster.data.displayName || cluster.data.name || clusterId;
   const statusLine = state?.live ? `Live as of ${state.collectedLabel}` : state?.collected ? `Collected ${state.collectedLabel}` : state ? "Not collected yet" : "Loading…";
   return <VStack as="section" aria-label="Node group details" gap={6}>
@@ -130,9 +141,10 @@ export function NodeGroupDetail({ clusterId, group }: { clusterId: string; group
       actions={manifest && <NodeGroupYamlButton manifest={manifest} />}
       metadata={back} />
     {detail.message && <Banner status={detail.tone === "error" ? "error" : "warning"} title="Node group status" description={detail.message} />}
-    <VStack gap={3}>
-      <NodeGroupResources nodes={count} resources={resources} />
-      {resources && <Text type="supporting">{resources.source === "live" ? `Requests summed from the ${count === 1 ? "node" : `${count} nodes`} below.` : "Requests as of the controller's last pass."}</Text>}
+    <VStack as="section" aria-label="Node group totals" gap={3}>
+      <NodeGroupResources nodes={live ? live.totals.nodes : count} resources={resources} />
+      <NodeTotalsNote state={totals.data} loading={totals.loading} error={totals.error} />
+      {!live && resources && <Text type="supporting">{resources.source === "live" ? `Requests summed from the ${count === 1 ? "node" : `${count} nodes`} below.` : "Requests as of the controller's last pass."}</Text>}
     </VStack>
     <VStack as="section" aria-label="Nodes" gap={3} width="100%">
       <HStack gap={3} vAlign="center" wrap="wrap"><Heading level={2}>Nodes</Heading><Text type="supporting" role="status">{statusLine}</Text></HStack>

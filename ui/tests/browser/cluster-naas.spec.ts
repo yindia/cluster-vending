@@ -31,6 +31,8 @@ async function mockNaaS(page: Page, initiallyEnabled = false) {
       case "ListNetworks": response = { networks: [network] }; break;
       case "GetNetwork": response = { network }; break;
       case "ListClusters": response = { clusters: [cluster()] }; break;
+      // The version field reads the channel's release; no release: it falls back to free text.
+      case "ListReleaseChannels": response = { channels: [] }; break;
       case "GetCluster": response = { cluster: cluster(), asRequested: true }; break;
       case "ListSubTenants": response = { subtenants: [] }; break;
       case "ListClusterEvents": response = { events: [] }; break;

@@ -263,3 +263,11 @@ export function nodeGroupSummaryRows(groups: readonly NodeGroupStatus[]): NodeGr
       };
     });
 }
+
+/** The control plane's CloudWatch log group, and its console page when that is an https URL. Undefined when logging is off. */
+export function controlPlaneLogs(aws: { controlPlaneLogGroup: string; controlPlaneLogsUrl: string } | undefined): { group: string; url?: string } | undefined {
+  if (!aws?.controlPlaneLogGroup) return undefined;
+  let url: string | undefined;
+  try { url = new URL(aws.controlPlaneLogsUrl).protocol === "https:" ? aws.controlPlaneLogsUrl : undefined; } catch { url = undefined; }
+  return { group: aws.controlPlaneLogGroup, url };
+}

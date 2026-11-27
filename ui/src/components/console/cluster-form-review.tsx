@@ -41,7 +41,7 @@ export function ClusterReview({ form, region, networkName, accountName, tier }: 
     <MetadataList columns="multi" title={<Heading level={4}>Access</Heading>}>
       <MetadataListItem label="API endpoints">{[form.privateAccess && "Private", form.publicAccess && "Public"].filter(Boolean).join(" + ")}</MetadataListItem>
       {form.publicAccess && <MetadataListItem label="Allowed sources">{form.publicCIDRs}</MetadataListItem>}
-      <MetadataListItem label="Administrators">{form.adminPrincipals || "No additional principals"}</MetadataListItem>
+      <MetadataListItem label="Administrators">{form.adminPrincipals || "Only the platform's role. Add your own IAM role or user to use kubectl."}</MetadataListItem>
       <MetadataListItem label="Service account roles">{form.irsa === "false" ? "Disabled" : "Enabled"}</MetadataListItem>
     </MetadataList>
     <ClusterExtraReview form={form} creating />
@@ -72,7 +72,7 @@ export function ClusterExtraReview({ form, creating = false, changed }: { form: 
     [shown(["maintenanceDays", "maintenanceStart", "maintenanceDuration"]), "Maintenance window", form.maintenanceStart ? `${tokens(form.maintenanceDays).map((day) => title(Weekday[Number(day)] ?? day)).join(", ") || "Every day"} · ${form.maintenanceStart} UTC · ${form.maintenanceDuration}` : "No restriction"],
     [shown(["awsSupportType"]), "AWS support policy", enumLabel(AwsSupportTypeSchema, form.awsSupportType)],
     [!creating && shown(["publicAccess", "privateAccess", "publicCIDRs"]), "API endpoints", `${[form.privateAccess && "Private", form.publicAccess && `Public (${form.publicCIDRs})`].filter(Boolean).join(" + ")}`],
-    [!creating && shown(["adminPrincipals"]), "Administrators", code(tokens(form.adminPrincipals), empty)],
+    [!creating && shown(["adminPrincipals"]), "Administrators", code(tokens(form.adminPrincipals), "Remove all: only the platform's role keeps kubectl access")],
     [!creating && shown(["irsa"]), "Service account roles", form.irsa === "false" ? "Disabled" : form.irsa === "true" ? "Enabled" : "Server default"],
     [shown(["awsAuthenticationMode"]), "AWS authentication mode", enumLabel(AwsAuthenticationModeSchema, form.awsAuthenticationMode)],
     [shown(["accessEntriesYaml"]), "Access entries", code(accessEntrySummaries(form.accessEntriesYaml), empty)],

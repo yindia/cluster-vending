@@ -29,12 +29,15 @@ import { ResourceWorkflowDialog } from "./manifest-create-dialog";
 
 const lockedFields: readonly string[] = createOnlyClusterFields;
 
-/** `current` is the cluster as the detail page shows it (resolved): the editor displays what the cluster runs from it. */
-export function EditCluster({ clusterId, current, network, onClose, onApplied }: { network?: Network; clusterId: string; current: Cluster; onClose: () => void; onApplied: () => void }) {
+/** The wizard step that holds Cluster administrators. */
+export const clusterAccessStep = 1;
+
+/** `current` is the cluster as the detail page shows it (resolved): the editor displays what the cluster runs from it. `initialStep` opens a later step, such as the access step. */
+export function EditCluster({ clusterId, current, network, initialStep = 0, onClose, onApplied }: { network?: Network; clusterId: string; current: Cluster; initialStep?: number; onClose: () => void; onApplied: () => void }) {
   const { api, tenantId } = usePlatform();
   const load = useCallback((signal: AbortSignal) => api.cluster.getCluster({ tenantId, clusterId, asRequested: true }, { signal }), [api, tenantId, clusterId]);
   const requested = useAsyncQuery(load);
-  if (requested.data?.cluster) return <ClusterEditor network={network} key={requested.data.cluster.etag} baseline={requested.data.cluster} current={current} asRequested={requested.data.asRequested} onApplied={onApplied} onClose={onClose} onReload={requested.refresh} />;
+  if (requested.data?.cluster) return <ClusterEditor network={network} key={requested.data.cluster.etag} baseline={requested.data.cluster} current={current} asRequested={requested.data.asRequested} initialStep={initialStep} onApplied={onApplied} onClose={onClose} onReload={requested.refresh} />;
   return <ResourceWorkflowDialog isOpen onOpenChange={(open) => { if (!open) onClose(); }} title="Edit cluster" steps={clusterWizardSteps} step={0}
     footer={<HStack gap={3}><Button label="Cancel editing" variant="secondary" onClick={onClose} />{!requested.loading && <Button label="Reload editable cluster" onClick={requested.refresh} />}</HStack>}>
     <ErrorNotice message={requested.error} />
@@ -42,7 +45,7 @@ export function EditCluster({ clusterId, current, network, onClose, onApplied }:
   </ResourceWorkflowDialog>;
 }
 
-function ClusterEditor({ baseline, current, network, asRequested, onApplied, onClose, onReload }: { baseline: Cluster; current: Cluster; network?: Network; asRequested: boolean; onApplied: () => void; onClose: () => void; onReload: () => void }) {
+function ClusterEditor({ baseline, current, network, asRequested, initialStep, onApplied, onClose, onReload }: { baseline: Cluster; current: Cluster; network?: Network; asRequested: boolean; initialStep: number; onApplied: () => void; onClose: () => void; onReload: () => void }) {
   const { api, tenantId } = usePlatform();
   const loadSubTenants = useCallback(async (signal: AbortSignal) => baseline.spec?.naas ? api.subtenant.listSubTenants({ tenantId, clusterId: baseline.id, pageSize: 1 }, { signal }) : undefined, [api, tenantId, baseline.id, baseline.spec?.naas]);
   const allocations = useAsyncQuery(loadSubTenants);
@@ -52,7 +55,7 @@ function ClusterEditor({ baseline, current, network, asRequested, onApplied, onC
   const [form, setForm] = useState(opened);
   const [revision, setRevision] = useState(0);
   const rows = useClusterFieldRows(form);
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(initialStep);
   const formId = useId();
   const [review, setReview] = useState<ReviewedClusterPlan>();
   const [error, setError] = useState("");

@@ -29,6 +29,8 @@ async function mockClusterCreate(page: Page, failFirstCreate = false) {
       case "ListNetworks": response = { networks: [network] }; break;
       case "GetNetwork": response = { network }; break;
       case "ListClusters": response = { clusters: [] }; break;
+      // The version field reads the channel's release; no release: it falls back to free text.
+      case "ListReleaseChannels": response = { channels: [] }; break;
       case "CreateCluster":
         if (failFirstCreate && calls.filter((call) => call.method === method).length === 1) {
           await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "unavailable", message: "Retry the same reviewed request" }) });

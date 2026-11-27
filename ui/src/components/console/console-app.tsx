@@ -22,6 +22,7 @@ import type { Section } from "@/lib/navigation";
 import { tenantSwitchPath } from "@/lib/workflows/tenants";
 import { ConnectionPanel } from "./connection-panel";
 import { TenantSelector } from "./tenant-selector";
+import { TenantDeleteSection } from "./tenant-delete";
 import { RefreshButton } from "./refresh-button";
 import { OverviewPage } from "./overview-page";
 import { AccountsPage } from "./accounts-page";
@@ -122,6 +123,7 @@ export default function ConsoleApp({ section = "overview", resourceId, subtenant
               <SegmentedControl label="Appearance" value={mode} onChange={setMode} size="md" layout="fill"><SegmentedControlItem value="light" label="Light" /><SegmentedControlItem value="dark" label="Dark" /><SegmentedControlItem value="system" label="System" /></SegmentedControl>
             </VStack>
           </VStack>
+          <TenantDeleteSection key={scopeKey} onSwitch={switchTenant} />
         </VStack></LayoutContent>}
         footer={<LayoutFooter padding={6} hasDivider><HStack gap={2} hAlign="end" wrap="wrap"><Button label="Close" onClick={() => setConnectionOpen(false)} />{!browserAuth.enabled && <Button label="Connect" variant="primary" type="submit" form={`${settingsId}-form`} />}</HStack></LayoutFooter>}
       />

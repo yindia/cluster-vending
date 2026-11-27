@@ -31,6 +31,7 @@ import { WizardDialog } from "./wizard-dialog";
 import { DetailHeader, DetailSummary } from "./detail-layout";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ValuesEditor, type ValuesEditorHandle } from "./values-editor";
+import { ComponentCloudResourcesSection } from "./component-cloud-resources";
 
 function enumLabel(value: string | undefined, number: number) {
   return value ? value.toLowerCase().replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase()) : `Unknown (${number})`;
@@ -136,6 +137,7 @@ function ComponentDetail({ name }: { name: string }) {
             {definition.requires.length ? <HStack gap={3} wrap="wrap">{definition.requires.map(required => <Link key={required} href={componentHref(required)}>{required}</Link>)}</HStack> : <Text>No dependencies reported.</Text>}
             <Text>Conflicting addons: {definition.conflictsWithAddons.join(", ") || "None reported"}</Text>
           </VStack>
+          <ComponentCloudResourcesSection resources={definition.cloudResources} />
         </>}
         {tab === "values" && <>
           <VStack gap={3}>

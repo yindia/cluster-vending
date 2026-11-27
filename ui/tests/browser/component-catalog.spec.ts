@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 const clusterId = "00000000-0000-4000-8000-000000000003";
-const definition = { name: "external-dns", description: "Synchronize DNS records.", management: "COMPONENT_MANAGEMENT_TENANT", provider: "CLOUD_PROVIDER_AWS", configurable: true, requires: ["policies"], versions: { "1.35": "0.16.0" }, platformValues: { policy: "sync" }, valuesSchema: { type: "object", properties: { replicaCount: { type: "integer" } } } };
+const cloudResources = { iamRole: { access: "COMPONENT_IAM_ACCESS_POD_IDENTITY", serviceAccounts: [{ namespace: "external-dns", name: "external-dns" }], managedPolicyArns: ["arn:aws:iam::aws:policy/AmazonRoute53ReadOnlyAccess"], policy: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"route53:ChangeResourceRecordSets","Resource":"*"}]}' } };
+const definition = { name: "external-dns", description: "Synchronize DNS records.", management: "COMPONENT_MANAGEMENT_TENANT", provider: "CLOUD_PROVIDER_AWS", configurable: true, requires: ["policies"], versions: { "1.35": "0.16.0" }, platformValues: { policy: "sync" }, valuesSchema: { type: "object", properties: { replicaCount: { type: "integer" } } }, cloudResources };
 async function mockCatalog(page: Page, allowCluster = false) {
   const calls: { method: string; body: Record<string, unknown> }[] = [], unexpected: string[] = [];
   await page.route("**/api/rpc/**", async (route) => {
@@ -11,7 +12,7 @@ async function mockCatalog(page: Page, allowCluster = false) {
     switch (method) {
       case "WhoAmI": response = { anonymous: true }; break;
       case "ListTenants": response = { tenants: [{ id: "acme" }] }; break;
-      case "ListComponentDefinitions": response = { definitions: [definition, { ...definition, name: "policies", requires: [] }, { ...definition, name: "blocked", disabled: true, disabledReason: "Disabled by catalog policy" }] }; break;
+      case "ListComponentDefinitions": response = { definitions: [definition, { ...definition, name: "policies", requires: [], cloudResources: undefined }, { ...definition, name: "blocked", disabled: true, disabledReason: "Disabled by catalog policy" }] }; break;
       case "GetComponentValues": response = { userValues: "# Replica count\nreplicaCount: 2\n" }; break;
       case "GetCluster": if (allowCluster) { response = { cluster: { id: clusterId, tenantId: "acme", name: "production", spec: {}, status: { state: "CLUSTER_STATE_RUNNING" } } }; break; } return fail();
       case "ListClusterEvents": if (allowCluster) { response = { events: [] }; break; } return fail();
@@ -56,7 +57,7 @@ test("component details remain read-only catalog with release versions, template
   await expect(overview.getByRole("link", { name: "policies", exact: true })).toHaveAttribute("href", "/components/policies");
   const tab = page.getByRole("tab", { name: "Values", exact: true }); await tab.focus(); await tab.press("Enter");
   const values = page.getByRole("tabpanel", { name: "Values", exact: true });
-  await expect(values.getByRole("textbox", { name: "Platform locked values", exact: true })).toHaveAttribute("aria-readonly", "true");
+  await expect(values.getByRole("textbox", { name: "Default config", exact: true })).toHaveAttribute("aria-readonly", "true");
   await expect(values.getByRole("textbox", { name: "Helm values template", exact: true })).toContainText("# Replica count");
   await expect(values.getByRole("textbox", { name: "Helm values template", exact: true })).toHaveAttribute("aria-readonly", "true");
   await expect(page.getByRole("textbox", { name: "Tenant values", exact: true })).toHaveCount(0);
@@ -77,5 +78,21 @@ test("cluster detail retains management and treats id-less READY tenant entries 
   await expect(policies).toContainText("Disabled"); await expect(policies).not.toContainText("Ready");
   await expect(policies.getByRole("button", { name: "Enable component", exact: true })).toBeEnabled();
   expect(mock.calls.some((call) => call.method === "ListComponents" && call.body.clusterId === clusterId)).toBe(true);
+  expect(mock.unexpected).toEqual([]);
+});
+
+test("component details show the IAM role it creates in the tenant's account, read-only", async ({ page }) => {
+  const mock = await mockCatalog(page);
+  await page.goto("/components/external-dns");
+  const section = page.getByRole("region", { name: "Cloud resources", exact: true });
+  await expect(section).toContainText("Created in your tenant's AWS account");
+  await expect(section).toContainText("EKS Pod Identity");
+  await expect(section).toContainText("external-dns/external-dns");
+  await expect(section).toContainText("arn:aws:iam::aws:policy/AmazonRoute53ReadOnlyAccess");
+  const policy = section.getByRole("textbox", { name: "IAM policy document", exact: true });
+  await expect(policy).toContainText("route53:ChangeResourceRecordSets");
+  await expect(policy).toHaveAttribute("aria-readonly", "true");
+  await page.goto("/components/policies");
+  await expect(page.getByRole("region", { name: "Cloud resources", exact: true })).toContainText("creates no cloud resources");
   expect(mock.unexpected).toEqual([]);
 });

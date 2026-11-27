@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import type { DescEnum } from "@bufbuild/protobuf";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Divider } from "@astryxdesign/core/Divider";
@@ -11,14 +12,16 @@ import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { AwsAuthenticationModeSchema, AwsClusterLogTypeSchema, AwsSupportTypeSchema } from "@/gen/cloud/v1/aws_pb";
+import { AwsAuthenticationModeSchema, AwsClusterLogTypeSchema, AwsSupportType, AwsSupportTypeSchema } from "@/gen/cloud/v1/aws_pb";
 import { UpgradeMode, Weekday, type Cluster } from "@/gen/cloud/v1/cluster_pb";
 import type { ClusterForm } from "@/lib/workflows/clusters";
+import { extendedSupportFields, extendedSupportIssue, isExtendedVersion, type KubernetesVersionOption } from "@/lib/workflows/kubernetes-versions";
 import { FormEntryRows, keyIssues, type FormEntry } from "./form-entry-rows";
 import { TokenListInput } from "./token-list-input";
 import { AccessEntriesFields, OidcFields } from "./cluster-access-fields";
 import { AddonsFields } from "./cluster-aws-fields";
 import { tierLabel } from "./cluster-network-picker";
+import { KubernetesVersionField, useKubernetesOffer } from "./cluster-version-field";
 
 export const title = (value: string) => value.toLowerCase().replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
 export const enumOptions = (schema: DescEnum, defaultLabel = "Server default") => schema.values.map((value) => ({ value: value.number ? String(value.number) : "", label: value.number ? title(value.localName) : defaultLabel }));
@@ -29,6 +32,9 @@ const booleanOptions = [{ value: "", label: "Server default" }, { value: "true",
 /** Node groups are not settings of a cluster: the platform creates them from its own configuration. */
 export const platformNodeGroupsNote = "Managed by the platform: it creates the system node group and the Karpenter platform pool from its configuration. They show on the cluster's Node groups tab.";
 const fixedNote = "Set when the cluster is created; it cannot be changed.";
+/** Only the platform's role is admin by default; the console, unlike the CLI, does not add the caller. */
+export const adminPrincipalsNote = "IAM role or user ARNs that get cluster-admin. Only the platform's own role is an administrator by default: add your own IAM role or user (the identity of your AWS session) to use kubectl on this cluster. Type a value and press Enter.";
+const extendedNote = "This Kubernetes minor is on extended support: the release offers it on no channel, so it runs with Manual upgrades and the Extended support policy.";
 const plain = { autoComplete: "off", autoCapitalize: "none", hasAutoCorrect: false, hasSpellCheck: false } as const;
 
 function entries(value: string): FormEntry[] {
@@ -91,7 +97,7 @@ function useInputs({ value, onChange, disabled, creating }: ClusterFieldsProps) 
   const text = (field: keyof ClusterForm, label: string, description?: string, options: { locked?: string; required?: boolean; placeholder?: string } = {}) => <TextInput
     label={label} htmlName={field} value={String(value[field])} onChange={(next) => { if (!options.locked) onChange(field, next); }}
     description={options.locked ?? description} isRequired={options.required && !options.locked} isReadOnly={!!options.locked} isDisabled={disabled} placeholder={options.placeholder} {...plain} />;
-  const choice = (field: keyof ClusterForm, label: string, options: { label: string; value: string }[], locked?: string, description?: string) => <Selector label={label} value={String(value[field])}
+  const choice = (field: keyof ClusterForm, label: string, options: { label: string; value: string; disabled?: boolean; description?: string }[], locked?: string, description?: string) => <Selector label={label} value={String(value[field])}
     onChange={(next) => { if (!locked) onChange(field, next); }} options={options} isDisabled={disabled || !!locked} description={locked ?? description} />;
   /** Comma-separated form lists as token inputs; read-only text when fixed. */
   const list = (field: keyof ClusterForm, label: string, description: string, options: { locked?: string; placeholder?: string; max?: number; error?: string } = {}) => options.locked
@@ -107,6 +113,15 @@ function SettingsStep(props: ClusterFieldsProps) {
   const automatic = Number(value.upgradeMode) === UpgradeMode.AUTOMATIC;
   const running = current?.status?.currentKubernetesVersion || current?.spec?.controlPlane?.kubernetesVersion;
   const days = tokens(value.maintenanceDays);
+  const offer = useKubernetesOffer(value.releaseChannel);
+  // An edit without a pin stays on the minor it runs: that minor is the one the server checks.
+  const extended = isExtendedVersion(offer.options, value.kubernetesVersion || running || "");
+  const extendedIssue = extendedSupportIssue(value, offer.options, running);
+  const chooseVersion = (version: string, option: KubernetesVersionOption | undefined) => {
+    onChange("kubernetesVersion", version);
+    if (option?.extended) { onChange("upgradeMode", extendedSupportFields.upgradeMode); onChange("awsSupportType", extendedSupportFields.awsSupportType); }
+  };
+  const supportOptions = enumOptions(AwsSupportTypeSchema).map((option) => extended && option.value === String(AwsSupportType.STANDARD) ? { ...option, disabled: true, description: extendedNote } : option);
   return <>
     {creating ? <FormLayout>
       <TextInput label="Cluster name" value={value.name} onChange={(next) => onChange("name", next)} placeholder="production-eks" isRequired isDisabled={disabled} {...plain} description="1–40 lowercase letters, digits and hyphens. Start with a letter and end with a letter or digit." />
@@ -118,10 +133,13 @@ function SettingsStep(props: ClusterFieldsProps) {
         <Selector label="Release channel" value={value.releaseChannel} isDisabled={disabled} onChange={(next) => onChange("releaseChannel", next)} options={[
           { value: "0", label: automatic ? "Stable (default)" : "None (default)" }, { value: "1", label: "Alpha" }, { value: "2", label: "Beta" }, { value: "3", label: "Stable" },
         ]} />
-        <Selector label="Upgrades" value={value.upgradeMode} isDisabled={disabled} onChange={(next) => onChange("upgradeMode", next)} options={[{ value: "1", label: "Manual (default)" }, { value: "2", label: "Automatic" }]} />
+        <Selector label="Upgrades" value={value.upgradeMode} isDisabled={disabled} onChange={(next) => onChange("upgradeMode", next)}
+          options={[{ value: "1", label: "Manual (default)" }, { value: "2", label: "Automatic", disabled: extended && !automatic, description: extended ? extendedNote : undefined }]} />
       </FormLayout>
-      {!automatic && text("kubernetesVersion", "Kubernetes minor version", `Optional, for example 1.33. Leave empty for the server default. A minor on no release channel (extended support) runs with Manual upgrades only.${running ? ` Running ${running}.` : ""}`, { placeholder: running ? `Server default (running ${running})` : "Server default" })}
-      {choice("awsSupportType", "AWS support policy", enumOptions(AwsSupportTypeSchema), undefined, "Extended support keeps an older Kubernetes version past standard support, at extra cost.")}
+      {!automatic && <KubernetesVersionField value={value.kubernetesVersion} offer={offer} running={running} disabled={disabled} onChange={chooseVersion} />}
+      {choice("awsSupportType", "AWS support policy", supportOptions, undefined, "Extended support keeps an older Kubernetes version past standard support, at extra cost.")}
+      {extended && !extendedIssue && <Text type="supporting" data-extended-support="">{extendedNote} Automatic upgrades and the Standard support policy are unavailable until the cluster moves to a minor on a release channel.</Text>}
+      {extendedIssue && <Banner status="warning" title="Extended-support version" description={extendedIssue} />}
     </Section>
     <Section title="Node groups" description={platformNodeGroupsNote} />
     <Section title="Namespace as a Service">
@@ -156,7 +174,7 @@ function AccessStep(props: ClusterFieldsProps) {
       {!value.publicAccess && <Text type="supporting">The management plane must be able to reach the private endpoint to install charts.</Text>}
     </Section>
     <Section title="Cluster access" description="Who may administer the cluster, and how IAM principals map to Kubernetes.">
-      {list("adminPrincipals", "Cluster administrators", "Optional IAM role or user ARNs that get cluster-admin. Type a value and press Enter.", { placeholder: "arn:aws:iam::111122223333:role/admin", max: 20 })}
+      {list("adminPrincipals", "Cluster administrators", adminPrincipalsNote, { placeholder: "arn:aws:iam::111122223333:role/admin", max: 20 })}
       {choice("awsAuthenticationMode", "AWS authentication mode", enumOptions(AwsAuthenticationModeSchema, "API · server default"), fixed, "How IAM principals authenticate: EKS access entries (API), the aws-auth ConfigMap, or both.")}
       <AccessEntriesFields value={value.accessEntriesYaml} onChange={(next) => onChange("accessEntriesYaml", next)} disabled={disabled} />
       {choice("irsa", "AWS service account roles (IRSA)", [{ value: "default", label: "Enabled · server default" }, { value: "true", label: "Enabled" }, { value: "false", label: "Disabled" }], undefined, "Lets pods assume IAM roles through the cluster's OIDC issuer.")}

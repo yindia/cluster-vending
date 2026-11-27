@@ -29,6 +29,8 @@ async function mock(page: Page) {
       case "ListNetworks": response = { networks: [network] }; break;
       case "GetNetwork": response = { network }; break;
       case "ListClusters": response = { clusters: [] }; break;
+      // The version field reads the channel's release; no release: it falls back to free text.
+      case "ListReleaseChannels": response = { channels: [] }; break;
       case "GetCluster": response = { cluster, asRequested: true }; break;
       case "ListClusterEvents": response = { events: [] }; break;
       case "CreateCluster": response = { cluster: { ...cluster, ...body.cluster as object } }; break;

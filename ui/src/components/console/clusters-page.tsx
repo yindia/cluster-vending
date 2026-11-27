@@ -53,7 +53,8 @@ import { ClusterWorkloadSummary } from "./cluster-workload-summary";
 import { CopyButton, CopyValue } from "./copy-value";
 import { ResourceYamlButton } from "./resource-yaml-button";
 import { CreateCluster } from "./cluster-create";
-import { EditCluster } from "./cluster-edit";
+import { EditCluster, clusterAccessStep } from "./cluster-edit";
+import { controlPlaneLogs } from "@/lib/workflows/cluster-summary";
 import { ErrorNotice, NetworkPicker, NetworkPlacement, tierLabel, useClusterNetworks } from "./cluster-network-picker";
 import { ClusterTopology } from "./cluster-topology";
 import { ClusterConfiguration } from "./cluster-configuration";
@@ -272,7 +273,8 @@ function ImportCluster({ onClose, onImported }: { onClose: () => void; onImporte
 function ClusterDetails({ clusterId }: { clusterId: string }) {
   const { api, tenantId } = usePlatform();
   const [polling, setPolling] = useState(true);
-  const [editing, setEditing] = useState(false);
+  // false: closed; otherwise the wizard step the editor opens at.
+  const [editing, setEditing] = useState<number | false>(false);
   const [deleting, setDeleting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [message, setMessage] = useState("");
@@ -344,8 +346,8 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
         metadata={<HStack gap={4} wrap="wrap" vAlign="center"><ProviderIcon provider={cluster.spec?.provider.case ?? ""} size="sm" /><CopyValue value={cluster.name} label="cluster name" isSecondary /><CopyValue value={cluster.id} label="cluster ID" isSecondary /></HStack>}
         status={<>{statusValue(ClusterState, status?.state)}{pause && pause.key !== "not-paused" && <StatusValue label={[pause.label, status?.freeze?.scope].filter(Boolean).join(" · ")} tone={pause.tone} />}</>}
         actions={<HStack gap={2} wrap="wrap" vAlign="center">
-          <ClusterAccessButton cluster={cluster} />
-          {<Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(true); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} />}
+          <ClusterAccessButton cluster={cluster} onEditAdministrators={status?.state === ClusterState.DELETING ? undefined : () => { setEditing(clusterAccessStep); setMessage(""); }} />
+          {<Button label="Edit cluster" variant="secondary" onClick={() => { setEditing(0); setMessage(""); }} isDisabled={status?.state === ClusterState.DELETING} />}
           {<ClusterActions cluster={cluster} onDelete={() => setDeleting(true)}
             onAccepted={() => { setMessage("Takeover request accepted. Ownership and convergence continue asynchronously."); refresh(); }} />}
         </HStack>}
@@ -371,6 +373,7 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
               <MetadataListItem label="Cloud account">{network.data?.network?.spec?.bootstrapId ? <CopyReference href={`/accounts/${encodeURIComponent(network.data.network.spec.bootstrapId)}`} value={network.data.network.spec.bootstrapId} label="cloud account ID" /> : "Inherited from network"}</MetadataListItem>
               <MetadataListItem label="Rollout tier">{tierLabel(status?.tier)}</MetadataListItem>
               <MetadataListItem label="Generation">{String(status?.observedGeneration ?? 0)} observed / {String(cluster.generation)} desired</MetadataListItem>
+              {(aws || desiredAws) && <MetadataListItem label="Control plane logs"><ControlPlaneLogs logs={controlPlaneLogs(aws)} /></MetadataListItem>}
               <MetadataListItem label="Platform release">{status?.platformRelease ? <Link href={`/releases/${encodeURIComponent(status.platformRelease)}`}>{status.platformRelease}</Link> : "Not reported"}</MetadataListItem>
               <MetadataListItem label="Namespace as a Service (NaaS)"><VStack gap={1}><Text>{cluster.spec?.naas ? "Enabled" : "Disabled"}</Text>{cluster.spec?.naas && <Link href={tabHref("subtenants")}>View Sub Tenants</Link>}</VStack></MetadataListItem>
             </MetadataList>
@@ -486,10 +489,18 @@ function ClusterDetails({ clusterId }: { clusterId: string }) {
       {activeTab === "deprecations" && <VStack id={panelId("deprecations")} role="tabpanel" aria-label="Deprecated APIs" tabIndex={0} gap={6}><ClusterDeprecationsPanel clusterId={clusterId} /></VStack>}
       {activeTab === "subtenants" && cluster.spec?.naas && <VStack id={panelId("subtenants")} role="tabpanel" aria-label="Sub Tenants" tabIndex={0} gap={6}><ClusterSubTenants clusterId={clusterId} /></VStack>}
       {activeTab === "recommendations" && <VStack id={panelId("recommendations")} role="tabpanel" aria-label="Recommendations" tabIndex={0} gap={6}><ClusterRecommendationsPanel clusterId={clusterId} /></VStack>}
-      {editing && <EditCluster network={network.data?.network} clusterId={clusterId} current={cluster} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
+      {editing !== false && <EditCluster network={network.data?.network} clusterId={clusterId} current={cluster} initialStep={editing} onClose={() => setEditing(false)} onApplied={() => { setEditing(false); setMessage("Update recorded. The controller is converging the desired state."); refresh(); }} />}
       {deleting && <DeleteCluster cluster={cluster} onCancel={() => setDeleting(false)} onDeleted={() => { setDeleting(false); setMessage("Deletion requested. Resources are removed asynchronously."); refresh(); }} />}
       {retrying && <RetryCluster clusterId={clusterId} onClose={() => setRetrying(false)} onRetried={refresh} />}
     </>}
+  </VStack>;
+}
+
+function ControlPlaneLogs({ logs }: { logs: ReturnType<typeof controlPlaneLogs> }) {
+  if (!logs) return <Text>Off · no control plane log types enabled</Text>;
+  return <VStack gap={1}>
+    {logs.url ? <Link href={logs.url} isExternalLink>View in CloudWatch</Link> : <Text color="secondary">CloudWatch link not reported</Text>}
+    <CopyValue value={logs.group} label="control plane log group" />
   </VStack>;
 }
 

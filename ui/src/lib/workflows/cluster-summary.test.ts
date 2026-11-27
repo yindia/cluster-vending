@@ -5,7 +5,7 @@ import { ClusterStatusSchema } from "../../gen/cloud/v1/cluster_pb";
 import { NodeGroupPhase, NodeGroupStatusSchema } from "../../gen/cloud/v1/node_group_pb";
 import { ConditionStatus } from "../../gen/cloud/v1/conditions_pb";
 import {
-  clusterCapacity, clusterSummaryView, formatCpu, formatMemory, nodeGroupSummaryRows, nodeGroupTotals, reachabilityView, severityTone, share, utilizationTone,
+  clusterCapacity, clusterSummaryView, controlPlaneLogs, formatCpu, formatMemory, nodeGroupSummaryRows, nodeGroupTotals, reachabilityView, severityTone, share, utilizationTone,
 } from "./cluster-summary";
 
 const now = Date.UTC(2026, 10, 20, 12, 0, 0);
@@ -152,4 +152,13 @@ test("breakdowns list the largest counts first", () => {
     violationEvents: { total: 4, byReason: [{ name: "FailedAdmission", count: 1 }, { name: "PolicyViolation", count: 3 }], policyCollectedAt: ago(1) },
   }), now);
   assert.deepEqual(view.items[2].breakdown?.map(c => c.name), ["PolicyViolation", "FailedAdmission"]);
+});
+
+test("control plane logs link only to an https console page, and are off without a log group", () => {
+  const group = "/aws/eks/production/cluster", url = "https://us-west-2.console.aws.amazon.com/cloudwatch/home?region=us-west-2#logsV2:log-groups/log-group/$252Faws$252Feks$252Fproduction$252Fcluster";
+  assert.deepEqual(controlPlaneLogs({ controlPlaneLogGroup: group, controlPlaneLogsUrl: url }), { group, url });
+  assert.deepEqual(controlPlaneLogs({ controlPlaneLogGroup: group, controlPlaneLogsUrl: "javascript:alert(1)" }), { group, url: undefined });
+  assert.deepEqual(controlPlaneLogs({ controlPlaneLogGroup: group, controlPlaneLogsUrl: "" }), { group, url: undefined });
+  assert.equal(controlPlaneLogs({ controlPlaneLogGroup: "", controlPlaneLogsUrl: url }), undefined);
+  assert.equal(controlPlaneLogs(undefined), undefined);
 });

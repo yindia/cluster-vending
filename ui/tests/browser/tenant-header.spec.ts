@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 type RpcCall = { method: string; body: Record<string, unknown>; authorization: string };
 
 /** Every RPC is intercepted; stale directory results deliberately omit created tenants. */
-async function mockTenantHeader(page: Page, options: { returnedId?: string; pauseCreate?: boolean } = {}) {
+async function mockTenantHeader(page: Page, options: { returnedId?: string; pauseCreate?: boolean; refuseDelete?: boolean } = {}) {
   const calls: RpcCall[] = [];
   const unexpected: string[] = [];
   let identityChanged = false;
@@ -25,6 +25,10 @@ async function mockTenantHeader(page: Page, options: { returnedId?: string; paus
       case "CreateTenant":
         if (pendingCreate) await pendingCreate;
         response = { tenant: { id: options.returnedId ?? body.tenantId, createTime: "2026-11-16T00:00:00Z" } };
+        break;
+      case "DeleteTenant":
+        if (options.refuseDelete) { await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ code: "failed_precondition", message: "tenant acme still has 2 clusters and 1 network" }) }); return; }
+        response = { tenant: { id: body.tenantId } };
         break;
       case "ListCloudAccounts": response = { accounts: [] }; break;
       case "ListNetworks": response = { networks: [] }; break;
@@ -209,5 +213,42 @@ test("canceling the tenant review never sends a create RPC or remembers the draf
   await expect(page.getByRole("option", { name: "acme", exact: true })).toBeVisible();
   await expect(page.getByRole("option", { name: "new-team", exact: true })).toHaveCount(0);
   expect(mock.calls.filter((call) => call.method === "CreateTenant")).toHaveLength(0);
+  expect(mock.unexpected).toEqual([]);
+});
+
+async function openDeleteTenant(page: Page) {
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("dialog", { name: "Settings", exact: true }).getByRole("button", { name: "Delete tenant acme", exact: true }).click();
+  return page.getByRole("dialog", { name: "Delete tenant", exact: true });
+}
+
+test("deleting a tenant needs its ID typed, then switches to another tenant", async ({ page }) => {
+  const mock = await mockTenantHeader(page);
+  await page.goto("/");
+  await expect(tenantControl(page)).toContainText("acme");
+  const dialog = await openDeleteTenant(page);
+  const confirm = dialog.getByRole("button", { name: "Delete tenant", exact: true });
+  await expect(confirm).toBeDisabled();
+  await dialog.getByRole("textbox", { name: "Type acme to confirm", exact: true }).fill("acm");
+  await expect(confirm).toBeDisabled();
+  await dialog.getByRole("textbox", { name: "Type acme to confirm", exact: true }).fill("acme");
+  await confirm.click();
+  await expect(dialog).toHaveCount(0);
+  expect(mock.calls.filter((call) => call.method === "DeleteTenant").map((call) => call.body)).toEqual([{ tenantId: "acme" }]);
+  await expect(tenantControl(page)).toContainText("other");
+  expect(mock.unexpected).toEqual([]);
+});
+
+test("a refused tenant delete shows what the tenant still has and keeps the tenant", async ({ page }) => {
+  const mock = await mockTenantHeader(page, { refuseDelete: true });
+  await page.goto("/");
+  const dialog = await openDeleteTenant(page);
+  await dialog.getByRole("textbox", { name: "Type acme to confirm", exact: true }).fill("acme");
+  await dialog.getByRole("button", { name: "Delete tenant", exact: true }).click();
+  const alert = dialog.getByRole("alert");
+  await expect(alert).toContainText("The tenant still has resources");
+  await expect(alert).toContainText("tenant acme still has 2 clusters and 1 network. Delete them first, then delete the tenant.");
+  await dialog.getByRole("button", { name: "Cancel deletion", exact: true }).click();
+  await expect(tenantControl(page)).toContainText("acme");
   expect(mock.unexpected).toEqual([]);
 });

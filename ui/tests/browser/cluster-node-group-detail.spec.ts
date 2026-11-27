@@ -4,7 +4,8 @@ const clusterId = "00000000-0000-4000-8000-000000000003", networkId = "00000000-
 const COLLECTED = "2026-11-19T10:00:00Z";
 const TOTAL = 1000;
 type ListRequest = { nodeGroup: string; pageSize?: number; pageToken?: string; filter?: string; nameContains?: string };
-type Options = { empty?: boolean; incomplete?: boolean; unavailable?: boolean; failNextToken?: boolean };
+type Options = { empty?: boolean; incomplete?: boolean; unavailable?: boolean; failNextToken?: boolean; totals?: "live" };
+const GiB = 2 ** 30;
 
 // Every fifth node is not ready: 1,000 nodes, 200 of them not ready. Names sort as numbers.
 const nodeName = (group: string, i: number) => `${group}-node-${String(i).padStart(4, "0")}`;
@@ -42,6 +43,10 @@ async function mock(page: Page, options: Options = {}) {
       case "GetNetwork": response = { network: { id: networkId, tenantId: "acme", name: "production", spec: { region: "us-west-2", tier: "TIER_1" } } }; break;
       case "ListClusterEvents": response = { events: [] }; break;
       case "ListClusterNodeGroupManifests": response = { nodeGroups: manifests }; break;
+      // Without the totals option the server runs no live reader: UNIMPLEMENTED, as it answers then.
+      case "GetNodeResources":
+        if (options.totals === "live") { response = { liveAt: "2026-11-27T09:30:00Z", complete: true, groups: [{ nodeGroup: "platform-pool", nodes: 40, readyNodes: 38, allocatableCpuMillis: "80000", requestedCpuMillis: "20000", allocatableMemoryBytes: String(320 * GiB), requestedMemoryBytes: String(80 * GiB), allocatablePods: "1100", podCount: "550", podsWithoutRequests: "5", usedCpuMillis: "8000" }], cluster: { nodes: 40 } }; break; }
+        await route.fulfill({ status: 501, contentType: "application/json", body: JSON.stringify({ code: "unimplemented", message: "node resources are read live from the workload cluster, which this deployment does not do yet" }) }); return;
       case "ListNodeGroupNodes": {
         const req = body as ListRequest;
         lists.push(req);
@@ -235,4 +240,28 @@ test("a narrow viewport does not overflow the page", async ({ page }) => {
     await expect(page.getByRole("button", { name: "Next nodes page" })).toBeVisible();
     await expect(bodyRows(page).first()).toContainText("platform-pool-node-0000");
   }
+});
+
+test("live totals from the live reader replace the controller's counts in the node group summary", async ({ page }) => {
+  const api = await mock(page, { totals: "live" });
+  await page.goto(`/clusters/${clusterId}/node-groups/platform-pool`);
+  const totals = page.getByRole("region", { name: "Node group totals" });
+  await expect(totals).toContainText("Live totals as of 2026-11-27 09:30:00 UTC.");
+  await expect(totals).toContainText("40");
+  await expect(totals).toContainText("38 ready · 2 not ready");
+  await expect(totals).toContainText("20 of 80 cores");
+  await expect(totals).toContainText("80 of 320 GiB");
+  await expect(totals).toContainText("550 of 1,100 pods");
+  await expect(totals).toContainText("In use now: CPU 8 of 80 cores.");
+  expect(api.unexpected).toEqual([]);
+});
+
+test("without a live reader the summary says why and keeps the controller's counts", async ({ page }) => {
+  const api = await mock(page);
+  await page.goto(`/clusters/${clusterId}/node-groups/platform-pool`);
+  const totals = page.getByRole("region", { name: "Node group totals" });
+  await expect(totals).toContainText("Live totals unavailable");
+  await expect(totals).toContainText("which this deployment does not run");
+  await expect(totals).toContainText("1,000");
+  expect(api.unexpected).toEqual([]);
 });

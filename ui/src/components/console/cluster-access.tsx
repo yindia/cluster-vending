@@ -16,22 +16,24 @@ import { CopyButton } from "./copy-value";
 import { ProviderIcon, KubernetesIcon } from "./provider-icons";
 import { RefreshButton } from "./refresh-button";
 
-export function ClusterAccessButton({ cluster }: { cluster: Cluster }) {
+/** `onEditAdministrators` opens the cluster editor at its access step, offered when the cluster has no administrators. */
+export function ClusterAccessButton({ cluster, onEditAdministrators }: { cluster: Cluster; onEditAdministrators?: () => void }) {
   const { tenantId, scopeKey, identity } = usePlatform();
-  return <ClusterAccess key={`${scopeKey}:${cluster.id}`} cluster={cluster} tenantId={tenantId} signedIn={!!identity} />;
+  return <ClusterAccess key={`${scopeKey}:${cluster.id}`} cluster={cluster} tenantId={tenantId} signedIn={!!identity} onEditAdministrators={onEditAdministrators} />;
 }
 
-function ClusterAccess({ cluster, tenantId, signedIn }: { cluster: Cluster; tenantId: string; signedIn: boolean }) {
+function ClusterAccess({ cluster, tenantId, signedIn, onEditAdministrators }: { cluster: Cluster; tenantId: string; signedIn: boolean; onEditAdministrators?: () => void }) {
   const [open, setOpen] = useState(false);
   const supported = supportsCapability(cluster.spec?.provider.case ?? "", "cluster.kubeconfig");
   const available = supported && signedIn && !!tenantId && !!cluster.id && cluster.tenantId === tenantId;
   return <>
     <Button label="Get kubeconfig" onClick={() => setOpen(true)} isDisabled={!available} tooltip={!supported ? "This provider does not support kubeconfig access." : undefined} aria-haspopup="dialog" />
-    {open && available && <ClusterAccessDialog clusterId={cluster.id} tenantId={tenantId} name={cluster.displayName || cluster.name} onOpenChange={setOpen} />}
+    {open && available && <ClusterAccessDialog clusterId={cluster.id} tenantId={tenantId} name={cluster.displayName || cluster.name} onOpenChange={setOpen}
+      onEditAdministrators={onEditAdministrators && (() => { setOpen(false); onEditAdministrators(); })} />}
   </>;
 }
 
-function ClusterAccessDialog({ clusterId, tenantId, name, onOpenChange }: { clusterId: string; tenantId: string; name: string; onOpenChange: (open: boolean) => void }) {
+function ClusterAccessDialog({ clusterId, tenantId, name, onOpenChange, onEditAdministrators }: { clusterId: string; tenantId: string; name: string; onOpenChange: (open: boolean) => void; onEditAdministrators?: () => void }) {
   const { api } = usePlatform();
   const load = useCallback(async (signal: AbortSignal) => {
     const response = await api.cluster.getCluster({ tenantId, clusterId, live: true }, { signal });
@@ -42,6 +44,7 @@ function ClusterAccessDialog({ clusterId, tenantId, name, onOpenChange }: { clus
   const busy = query.loading || query.refreshing;
   // Never offer a previous command after a failed refresh or while revalidating.
   const access = !busy && !query.error && query.data ? clusterAccessCommand(query.data, tenantId, clusterId) : undefined;
+  const administrators = query.data?.spec?.access?.adminPrincipals.length ?? 0;
   return <Dialog isOpen onOpenChange={onOpenChange} purpose="info" width="min(48rem, calc(100vw - 2rem))" maxHeight="90dvh" padding={6}>
     <VStack gap={5}>
       <DialogHeader title="Get kubeconfig" subtitle={query.data?.id === clusterId && query.data.tenantId === tenantId ? query.data.displayName || query.data.name : name} onOpenChange={onOpenChange}
@@ -58,7 +61,10 @@ function ClusterAccessDialog({ clusterId, tenantId, name, onOpenChange }: { clus
           </StackItem>
           <StackItem size="static"><CopyButton value={access.command} label="AWS kubeconfig command" /></StackItem>
         </HStack>
-        <Text type="supporting">Run this command in your terminal with the AWS CLI installed and your own AWS session{access.accountId ? ` for account ${access.accountId}` : " for the cluster’s AWS account"}. It updates your local kubeconfig and current context. Your AWS identity must have EKS and Kubernetes access.</Text>
+        <Text type="supporting">Run this command in your terminal with the AWS CLI and an AWS session{access.accountId ? ` for account ${access.accountId}` : " for the cluster’s AWS account"}. It updates your local kubeconfig and current context.</Text>
+        {administrators ? <Text type="supporting" data-kubectl-access="">kubectl works only for an IAM role or user the cluster grants access: {administrators === 1 ? "its administrator" : `one of its ${administrators} administrators`}, or an access entry. Only the platform’s own role is an administrator by default.</Text>
+          : <Banner status="warning" title="No one but the platform can use kubectl yet" description="Only the platform’s own role is an administrator of this cluster. Add your IAM role or user under Edit cluster → Cluster administrators, then run this command."
+            endContent={onEditAdministrators && <Button label="Edit cluster administrators" variant="secondary" onClick={onEditAdministrators} />} />}
       </VStack>}
       <HStack hAlign="end"><Button label="Close" onClick={() => onOpenChange(false)} /></HStack>
     </VStack>

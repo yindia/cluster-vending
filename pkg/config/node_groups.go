@@ -17,7 +17,7 @@ import (
 //	nodeGroups:
 //	  system:                     # the default EKS managed node group: Karpenter and the EKS add-ons
 //	    instanceTypes: [t3.medium] # one architecture
-//	    minSize: 2                # at least 2; the static size (maxSize is ignored)
+//	    minSize: 3                # default 3, at least 2; the static size (maxSize is ignored)
 //	    capacityType: ON_DEMAND
 //	    amiType: AL2023_x86_64_STANDARD
 //	    diskSizeGiB: 0            # 0: EKS's default
@@ -77,7 +77,7 @@ const (
 	MinSystemNodeGroupSize = 2
 	// DefaultSystemNodeGroupMinSize is the group's static size unless the
 	// admin sets another: its min, max and desired size.
-	DefaultSystemNodeGroupMinSize = 2
+	DefaultSystemNodeGroupMinSize = 3
 	// DefaultSystemNodeGroupAMIType is the system group's AMI type unless
 	// the admin sets another.
 	DefaultSystemNodeGroupAMIType = "AL2023_x86_64_STANDARD"
@@ -114,7 +114,7 @@ var nodeGroupSettings = []Setting{
 	{Flag: FlagSystemNodeGroupSize, Env: EnvSystemNodeGroupSize,
 		Usage: "deprecated alias of --" + FlagSystemNodeGroupMinSize + " (nodeGroups.system.size)"},
 	{Flag: FlagSystemNodeGroupMinSize, Env: EnvSystemNodeGroupMinSize,
-		Usage: "static size of the system managed node group: its min, max and desired size (nodeGroups.system.minSize); default 2, at least 2: Karpenter runs two replicas with anti-affinity. A change applies to existing clusters in place, and sets their node count"},
+		Usage: "static size of the system managed node group: its min, max and desired size (nodeGroups.system.minSize); default 3, at least 2: Karpenter runs two replicas with anti-affinity. A change applies to existing clusters in place, and sets their node count"},
 	{Flag: FlagSystemNodeGroupMaxSize, Env: EnvSystemNodeGroupMaxSize,
 		Usage: "ignored: the system managed node group has one static size, --" + FlagSystemNodeGroupMinSize + " (nodeGroups.system.maxSize); accepted with a warning so old configs still start"},
 	{Flag: FlagSystemNodeGroupCapacityType, Env: EnvSystemNodeGroupCapacityType, Default: defaultCapacityType,

@@ -27,10 +27,10 @@ nodeGroups:
     # A list of one architecture and one vCPU/memory class, so a capacity
     # shortage of one type does not block creation.
     instanceTypes: [t3.medium]
-    # The static size (min = max = desired), at least 2: Karpenter runs two
+    # The static size (min = max = desired), 3 by default, at least 2: Karpenter runs two
     # replicas with anti-affinity. Nothing autoscales the group. Changed in
     # place. (maxSize is ignored: a value still set is warned about.)
-    minSize: 2
+    minSize: 3
     # ON_DEMAND or SPOT.
     capacityType: ON_DEMAND
     # The EKS AMI type, of the instance types' architecture:

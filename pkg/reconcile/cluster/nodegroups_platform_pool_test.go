@@ -160,6 +160,9 @@ func TestLegacyGateLeavesThePlatformPoolAlone(t *testing.T) {
 	require.NotEqual(t, legacyPlatformPool, platformPool)
 	lw := newLegacyWorld(t)
 	withPlatformPool(lw.world)
+	// The loaded config's static size, all Ready: the gate's first condition.
+	size := config.DefaultSystemNodeGroupMinSize
+	lw.systemNodeGroup(t, true, size, size)
 	// Not settled: the old pool stays; the new one is applied and stays.
 	lw.pass(t, lw.platformComponents("base"))
 	require.NotNil(t, lw.legacyObject(t, "NodePool"))

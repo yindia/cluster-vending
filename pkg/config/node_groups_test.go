@@ -22,10 +22,10 @@ func loadSection(t *testing.T, yaml string) config.LookupFunc {
 	return file
 }
 
-func TestNodeGroupsDefaultsAreT3AndTwoNodes(t *testing.T) {
+func TestNodeGroupsDefaultsAreT3AndThreeNodes(t *testing.T) {
 	want := config.NodeGroups{
 		Platform: config.DefaultNodeGroups().Platform,
-		System: config.SystemNodeGroup{InstanceTypes: []string{"t3.medium"}, MinSize: 2, CapacityType: "ON_DEMAND",
+		System: config.SystemNodeGroup{InstanceTypes: []string{"t3.medium"}, MinSize: 3, CapacityType: "ON_DEMAND",
 			AMIType: "AL2023_x86_64_STANDARD"},
 	}
 	if got := config.DefaultNodeGroups(); !reflect.DeepEqual(got, want) {
@@ -212,7 +212,7 @@ func TestNodeGroupsSizeIsAnAliasOfTheMinimum(t *testing.T) {
 		"large size":        {file: "nodeGroups:\n  system:\n    size: 8\n", min: 8},
 		"size and max":      {file: "nodeGroups:\n  system:\n    size: 3\n    maxSize: 5\n", min: 3},
 		"max below min":     {file: "nodeGroups:\n  system:\n    minSize: 4\n    maxSize: 1\n", min: 4},
-		"max not a number":  {env: map[string]string{config.EnvSystemNodeGroupMaxSize: "many"}, min: 2},
+		"max not a number":  {env: map[string]string{config.EnvSystemNodeGroupMaxSize: "many"}, min: 3},
 		"env":               {env: map[string]string{config.EnvSystemNodeGroupSize: "4"}, min: 4},
 		"same size and min": {env: map[string]string{config.EnvSystemNodeGroupSize: "4", config.EnvSystemNodeGroupMinSize: "4"}, min: 4},
 		"min only":          {env: map[string]string{config.EnvSystemNodeGroupMinSize: "7"}, min: 7},

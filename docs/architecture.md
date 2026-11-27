@@ -1967,7 +1967,7 @@ section for the server's one `--config` (a config test keeps the two equal).
 nodeGroups:
   system:                      # the default managed node group of every cluster: Karpenter and the EKS add-ons
     instanceTypes: [t3.medium] # one architecture, one vCPU/memory class
-    minSize: 2                 # at least 2 (Karpenter's two replicas); the fixed size, changed in place
+    minSize: 3                 # default 3, at least 2 (Karpenter's two replicas); the fixed size, changed in place
     capacityType: ON_DEMAND
     amiType: AL2023_x86_64_STANDARD  # of the instance types' architecture
     diskSizeGiB: 0             # 0 is EKS's default

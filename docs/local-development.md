@@ -109,7 +109,7 @@ http-addr: 127.0.0.1:8080
 leader-elect: false                    # one local controller
 automatic-upgrades: true               # false: plan upgrades but never start one
 nodeGroups:                            # the platform's node groups (docs/architecture.md#node-groups-configuration)
-  system: {instanceTypes: [t3.medium], minSize: 2, capacityType: ON_DEMAND, amiType: AL2023_x86_64_STANDARD}
+  system: {instanceTypes: [t3.medium], minSize: 3, capacityType: ON_DEMAND, amiType: AL2023_x86_64_STANDARD}
   platform: {instanceFamilies: [t3], instanceSizes: [large, xlarge, 2xlarge], architectures: [AMD64]}
 ```
 

@@ -96,7 +96,7 @@ platform:
       # One architecture and one vCPU/memory class.
       instanceTypes: [t3.medium]
       # The static size (min = max = desired), at least 2. Changed in place.
-      minSize: 2
+      minSize: 3
       # ON_DEMAND or SPOT.
       capacityType: ON_DEMAND
       # AL2023_x86_64_STANDARD, AL2023_ARM_64_STANDARD, BOTTLEROCKET_x86_64
